@@ -36,3 +36,11 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class LoginResponse(BaseModel):
+    admission_no: str
+    role: str
+    message: str
+
+    class Config:
+        from_attributes = True

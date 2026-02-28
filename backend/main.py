@@ -30,7 +30,7 @@ def login(user_data: schema.LoginRequest, db: Session = Depends(get_db)):
         "message": "Login successful"
     }
 
-@@app.get("/menu")
+@app.get("/menu")
 def get_menu(db: Session = Depends(get_db)):
     # Fetch all items from the food_items table
     items = db.query(models.FoodItem).all()
