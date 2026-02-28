@@ -90,3 +90,34 @@ def register_user(user: schema.UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
     return new_user
 
+@app.post("/book-multiple")
+def create_multiple_bookings(data: schema.MultiBookingCreate, db: Session = Depends(get_db)):
+    # 10:00 AM Deadline Check
+    now_time = datetime.now().time()
+    deadline = time(23, 0, 0)
+    
+    if now_time > deadline:
+        raise HTTPException(
+            status_code=400, 
+            detail="Same-day bookings are closed. Please book before 10:00 AM."
+        )
+
+    # Check if stock is available
+    item = db.query(models.FoodItem).filter(models.FoodItem.id == booking.item_id).first()
+    if item.base_stock <= 0:
+        raise HTTPException(status_code=400, detail="Item out of stock!")
+
+
+    # 2. Loop through each item in the cart
+    for item_id in data.item_ids:
+        new_booking = models.Booking(
+            user_id=data.admission_no,
+            item_id=item_id,
+            scheduled_slot=data.scheduled_slot,
+            order_type=data.order_type,
+            status="active"
+        )
+        db.add(new_booking)
+    
+    db.commit()
+    return {"message": f"Successfully booked {len(data.item_ids)} items!"}

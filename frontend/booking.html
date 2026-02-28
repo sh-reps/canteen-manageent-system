@@ -34,7 +34,21 @@
         <button onclick="confirmBooking()">Confirm Order</button>
         <button onclick="closeModal()">Cancel</button>
     </div>
-
+    <div id="cart-section">
+        <h2>Your Cart</h2>
+        <div id="cart-items">
+            </div>
+        <div class="cart-summary">
+            <p>Total: ₹<span id="cart-total">0</span></p>
+            <button id="checkout-btn" onclick="openBookingModal()" disabled>Proceed to Booking</button>
+        </div>
+    </div>
+    <div class="cart-summary">
+        <p>Total: ₹<span id="cart-total">0</span></p>
+        <button id="checkout-btn" onclick="openCheckoutModal()" disabled>
+            Proceed to Booking
+        </button>
+    </div>
     <script src="js/booking.js"></script>
 </body>
 </html>

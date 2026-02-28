@@ -37,13 +37,12 @@ async function loadMenu() {
 
         // Generate HTML for each food item
         container.innerHTML = items.map(item => `
-            <div class="food-card">
-                <h3>${item.name}</h3>
-                <p class="price">₹${item.price}</p>
-                <p class="stock">Available: ${item.base_stock} portions</p>
-                <button onclick="openBookingModal(${item.id}, '${item.name}')">Book Now</button>
-            </div>
-        `).join('');
+    <div class="food-card">
+        <h3>${item.name}</h3>
+        <p class="price">₹${item.price}</p>
+        <button onclick="addToCart(${item.id}, '${item.name}', ${item.price})">Add to Cart</button>
+    </div>
+`).join('');
     } catch (error) {
         console.error("Error loading menu:", error);
     }
@@ -79,4 +78,94 @@ async function placeOrder(itemId) {
 
     const result = await response.json();
     alert(result.message || result.detail);
+}
+let cart = [];
+
+function addToCart(id, name, price) {
+    cart.push({ id, name, price });
+    updateCartUI();
+}
+
+function updateCartUI() {
+    const cartList = document.getElementById('cart-items');
+    const totalDisplay = document.getElementById('cart-total');
+    
+    // 1. Clear the old list
+    cartList.innerHTML = "";
+    
+    // 2. Add each item from the cart array
+    cart.forEach((item, index) => {
+        const div = document.createElement('div');
+        div.className = 'cart-item';
+        div.innerHTML = `
+            <span>${item.name} - ₹${item.price}</span>
+            <button onclick="removeFromCart(${index})">Remove</button>
+        `;
+        cartList.appendChild(div);
+    });
+
+    // 3. Update the Total Price
+    const total = cart.reduce((sum, item) => sum + item.price, 0);
+    totalDisplay.innerText = total;
+
+    const checkoutBtn = document.getElementById('checkout-btn');
+    if (cart.length > 0) {
+        checkoutBtn.disabled = false;
+        checkoutBtn.style.backgroundColor = "#2e7d32"; // Optional: make it green when active
+        checkoutBtn.style.cursor = "pointer";
+    } else {
+        checkoutBtn.disabled = true;
+        checkoutBtn.style.backgroundColor = "#ccc";
+    }
+}
+
+function removeFromCart(index) {
+    cart.splice(index, 1);
+    updateCartUI();
+}
+
+function openCheckoutModal() {
+    if (cart.length === 0) {
+        alert("Your cart is empty!");
+        return;
+    }
+    document.getElementById('booking-modal').style.display = 'block';
+}
+
+async function confirmBooking() {
+    const admissionNo = localStorage.getItem("admission_no");
+    const slot = document.getElementById('time-slot').value; // Ensure this is "12:30:00"
+    const type = document.getElementById('order-type').value;
+
+    if (cart.length === 0) return;
+
+    // We will loop through the cart and send each item
+    for (const item of cart) {
+        const payload = {
+            admission_no: admissionNo,
+            item_id: item.id,
+            scheduled_slot: slot,
+            order_type: type
+        };
+
+        console.log("Sending Payload:", payload); // Debugging line
+
+        const response = await fetch('http://127.0.0.1:8000/book', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error("Booking failed for item:", item.name, errorData);
+            alert(`Failed to book ${item.name}: ${errorData.detail}`);
+            return; // Stop if one fails
+        }
+    }
+
+    alert("All items booked successfully!");
+    cart = [];
+    updateCartUI();
+    closeModal();
 }

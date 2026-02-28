@@ -46,3 +46,9 @@ class LoginResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class MultiBookingCreate(BaseModel):
+    admission_no: str
+    item_ids: list[int] # List of IDs from the cart
+    scheduled_slot: time
+    order_type: str
