@@ -1,14 +1,16 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from .database import get_db
-from . import models, schema # Importing your new files
+from . import models, schema 
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime, time
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -38,23 +40,35 @@ def get_menu(db: Session = Depends(get_db)):
 
 @app.post("/book")
 def create_booking(booking: schema.BookingCreate, db: Session = Depends(get_db)):
-    # THE 10:00 AM RULE
-    import datetime
-    now = datetime.datetime.now().time()
-    cutoff = datetime.time(10, 0, 0)
+    #  Check the 10:00 AM Deadline
+    now_time = datetime.now().time()
+    deadline = time(23, 0, 0)
     
-    if now > cutoff:
-        raise HTTPException(status_code=400, detail="Same-day bookings closed after 10:00 AM")
-    #boooking
+    if now_time > deadline:
+        raise HTTPException(
+            status_code=400, 
+            detail="Same-day bookings are closed. Please book before 10:00 AM."
+        )
+
+    # Check if stock is available
+    item = db.query(models.FoodItem).filter(models.FoodItem.id == booking.item_id).first()
+    if item.base_stock <= 0:
+        raise HTTPException(status_code=400, detail="Item out of stock!")
+
+    # Save the booking
     new_booking = models.Booking(
         user_id=booking.admission_no, 
         item_id=booking.item_id,
         scheduled_slot=booking.scheduled_slot,
         order_type=booking.order_type
     )
+    
+    # 4. Reduce base stock
+    item.base_stock -= 1
+    
     db.add(new_booking)
     db.commit()
-    return {"message": "Booking successful!"}
+    return {"message": "Order placed successfully!"}
 
 @app.post("/register", response_model=schema.UserResponse)
 def register_user(user: schema.UserCreate, db: Session = Depends(get_db)):
@@ -75,3 +89,4 @@ def register_user(user: schema.UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
     return new_user
+

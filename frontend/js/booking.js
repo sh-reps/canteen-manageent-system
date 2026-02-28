@@ -16,19 +16,49 @@ async function confirmBooking() {
     });
    
 }
-async function loadMenu() {
-    const response = await fetch('http://127.0.0.1:8000/menu');
-    const items = await response.json();
-    const container = document.getElementById('menu-container');
+document.addEventListener('DOMContentLoaded', () => {
+    // Display the student's Admission Number from local storage
+    const admissionNo = localStorage.getItem("admission_no");
+    document.getElementById('display-admission').innerText = `Welcome, ${admissionNo}`;
     
-    container.innerHTML = items.map(item => `
-        <div class="food-card">
-            <h3>${item.name}</h3>
-            <p>Price: ₹${item.price}</p>
-            <p>Available: ${item.base_stock}</p>
-            <button onclick="openBookingModal(${item.id})">Book Now</button>
-        </div>
-    `).join('');
+    loadMenu();
+});
+
+async function loadMenu() {
+    try {
+        const response = await fetch('http://127.0.0.1:8000/menu');
+        const items = await response.json();
+        const container = document.getElementById('menu-container');
+
+        if (items.length === 0) {
+            container.innerHTML = "<p>No items available for today yet.</p>";
+            return;
+        }
+
+        // Generate HTML for each food item
+        container.innerHTML = items.map(item => `
+            <div class="food-card">
+                <h3>${item.name}</h3>
+                <p class="price">₹${item.price}</p>
+                <p class="stock">Available: ${item.base_stock} portions</p>
+                <button onclick="openBookingModal(${item.id}, '${item.name}')">Book Now</button>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error("Error loading menu:", error);
+    }
+}
+
+let selectedItemId = null;
+
+function openBookingModal(itemId, itemName) {
+    selectedItemId = itemId;
+    document.getElementById('booking-modal').style.display = 'block';
+    // You can also update a title in the modal to show the item name
+}
+
+function closeModal() {
+    document.getElementById('booking-modal').style.display = 'none';
 }
 
 async function placeOrder(itemId) {

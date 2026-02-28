@@ -9,6 +9,7 @@ class LoginRequest(BaseModel):
 
 # Data needed to create a new Booking
 class BookingCreate(BaseModel):
+    admission_no: str
     item_id: int
     scheduled_slot: time # e.g., "12:30:00"
     order_type: str # Must be 'sit-in' or 'take-away'
@@ -18,6 +19,7 @@ class BookingResponse(BaseModel):
     id: int
     user_id: str
     item_id: int
+    price: int
     scheduled_slot: time
     status: str
 

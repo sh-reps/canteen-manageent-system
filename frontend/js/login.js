@@ -4,11 +4,21 @@ async function login() {
     const errorMsg = document.getElementById('error-message');
 
     try {
-        const response = await fetch(`http://127.0.0.1:8000/login?admission_no=${admission_no}&password=${password}`, {
-            method: 'POST'
-        });
+        const admission_no = document.getElementById('admission_no').value;
+    const password = document.getElementById('password').value;
 
-        const data = await response.json();
+    const response = await fetch('http://127.0.0.1:8000/login', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json' // Tell FastAPI to expect JSON
+        },
+        body: JSON.stringify({ 
+            admission_no: admission_no, 
+            password: password 
+        })
+    });
+
+    const data = await response.json();
 
         if (response.ok) {
             // Save the user info locally so they stay logged in during their session
