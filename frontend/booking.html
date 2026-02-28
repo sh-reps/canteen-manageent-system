@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Book Your Lunch</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <nav>
+        <span id="display-admission"></span>
+        <button onclick="logout()">Logout</button>
+    </nav>
+
+    <h1>Today's Menu</h1>
+    <p id="time-warning" style="color: orange; font-weight: bold;"></p>
+
+    <div id="menu-container">
+        </div>
+
+    <div id="booking-modal" style="display:none;">
+        <h3>Finalize Booking</h3>
+        <label>Select Lunch Time:</label>
+        <select id="time-slot">
+            <option value="12:30:00">12:30 PM</option>
+            <option value="13:15:00">1:15 PM</option>
+        </select>
+
+        <label>Dining Mode:</label>
+        <select id="order-type">
+            <option value="sit-in">Sit-in</option>
+            <option value="take-away">Take-away</option>
+        </select>
+
+        <button onclick="confirmBooking()">Confirm Order</button>
+        <button onclick="closeModal()">Cancel</button>
+    </div>
+
+    <script src="js/booking.js"></script>
+</body>
+</html>

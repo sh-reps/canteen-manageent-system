@@ -29,3 +29,29 @@ def login(user_data: schema.LoginRequest, db: Session = Depends(get_db)):
         "role": user.role, 
         "message": "Login successful"
     }
+
+@@app.get("/menu")
+def get_menu(db: Session = Depends(get_db)):
+    # Fetch all items from the food_items table
+    items = db.query(models.FoodItem).all()
+    return items
+
+@app.post("/book")
+def create_booking(booking: schema.BookingCreate, db: Session = Depends(get_db)):
+    # 1. THE 10:00 AM RULE
+    import datetime
+    now = datetime.datetime.now().time()
+    cutoff = datetime.time(10, 0, 0)
+    
+    if now > cutoff:
+        raise HTTPException(status_code=400, detail="Same-day bookings closed after 10:00 AM")
+    #boooking
+    new_booking = models.Booking(
+        user_id=booking.admission_no, 
+        item_id=booking.item_id,
+        scheduled_slot=booking.scheduled_slot,
+        order_type=booking.order_type
+    )
+    db.add(new_booking)
+    db.commit()
+    return {"message": "Booking successful!"}
