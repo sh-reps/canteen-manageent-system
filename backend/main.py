@@ -38,7 +38,7 @@ def get_menu(db: Session = Depends(get_db)):
 
 @app.post("/book")
 def create_booking(booking: schema.BookingCreate, db: Session = Depends(get_db)):
-    # 1. THE 10:00 AM RULE
+    # THE 10:00 AM RULE
     import datetime
     now = datetime.datetime.now().time()
     cutoff = datetime.time(10, 0, 0)
@@ -55,3 +55,23 @@ def create_booking(booking: schema.BookingCreate, db: Session = Depends(get_db))
     db.add(new_booking)
     db.commit()
     return {"message": "Booking successful!"}
+
+@app.post("/register", response_model=schema.UserResponse)
+def register_user(user: schema.UserCreate, db: Session = Depends(get_db)):
+    #Check if the Admission Number already exists
+    db_user = db.query(models.User).filter(models.User.admission_no == user.admission_no).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Admission Number already registered")
+
+    # Create the new user object
+    new_user = models.User(
+        admission_no=user.admission_no,
+        password=user.password, # Note: In a real app, you'd hash this!
+        role=user.role
+    )
+
+    # Save to Supabase
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user

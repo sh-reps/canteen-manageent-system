@@ -23,3 +23,16 @@ class BookingResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+#user regisration   
+class UserCreate(BaseModel):
+    admission_no: str
+    password: str
+    role: Optional[str] = "student" 
+
+class UserResponse(BaseModel):
+    admission_no: str
+    role: str
+
+    class Config:
+        from_attributes = True
