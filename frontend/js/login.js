@@ -27,4 +27,19 @@ async function login() {
     } catch (error) {
         errorMsg.innerText = "Cannot connect to server. Is FastAPI running?";
     }
+    // Inside your login function...
+    if (response.ok) {
+        const data = await response.json();
+        
+        // Store the ID in the browser's memory
+        localStorage.setItem("admission_no", data.admission_no);
+        localStorage.setItem("user_role", data.role);
+        
+        // Redirect based on role
+        if (data.role === 'admin') {
+            window.location.href = "admin.html";
+        } else {
+            window.location.href = "booking.html";
+        }
+    } 
 }

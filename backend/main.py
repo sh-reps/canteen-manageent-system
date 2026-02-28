@@ -1,12 +1,11 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from .database import get_db
-from . import models
+from . import models, schema # Importing your new files
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# Enable CORS so your frontend can talk to your backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,12 +13,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/login")
-def login(admission_no: str, password: str, db: Session = Depends(get_db)):
-    # Look for the student by their unique Admission Number
-    user = db.query(models.User).filter(models.User.admission_no == admission_no).first()
+@app.post("/login", response_model=schema.LoginResponse) # Using your schema
+def login(user_data: schema.LoginRequest, db: Session = Depends(get_db)):
+    # Look for the user in the database
+    user = db.query(models.User).filter(
+        models.User.admission_no == user_data.admission_no
+    ).first()
     
-    if not user or user.password != password:
+    # Check if user exists and password matches
+    if not user or user.password != user_data.password:
         raise HTTPException(status_code=401, detail="Invalid Admission Number or Password")
     
-    return {"message": "Login Successful", "role": user.role, "admission_no": user.admission_no}
+    return {
+        "admission_no": user.admission_no, 
+        "role": user.role, 
+        "message": "Login successful"
+    }
