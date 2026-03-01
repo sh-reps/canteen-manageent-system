@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime, time
-from typing import Optional
+from typing import List, Optional
 
 # Data needed for Login
 class LoginRequest(BaseModel):
@@ -53,4 +53,6 @@ class MultiBookingCreate(BaseModel):
     item_ids: list[int] # List of IDs from the cart
     scheduled_slot: time
     order_type: str
-    seat_id: Optional[int] = None
+    seat_ids: Optional[List[int]] = []
+
+MultiBookingCreate.model_rebuild()

@@ -29,15 +29,24 @@
             </select>
 
             <label>Dining Mode:</label>
-            <select id="order-type" onchange="toggleSeatSelection()">
+            <select id="order-type" onchange="toggleSeatUI()">
                 <option value="take-away">Take-away</option>
-                <option value="sit-in">Sit-in (Reserve a Seat)</option>
+                <option value="sit-in">Sit-in (Pick Seats)</option>
             </select>
 
-            <div id="seat-selection-area" style="display:none;">
-                <label>Available Seats (4 per table):</label>
-                <select id="seat-id">
-                    </select>
+            <div id="seat-modal" class="modal-overlay" style="display:none;">
+                <div id="seat-selection-area" class="modal-content"> <span class="close-btn" onclick="closeSeatModal()">&times;</span>
+                    <h3>Canteen Seating Map</h3>
+                    <p>Select up to 4 seats.</p>
+                    
+                    <div id="seat-grid" class="seat-grid">
+                        </div>
+
+                    <div class="modal-footer">
+                        <span id="seat-count-display">Seats selected: 0/4</span>
+                        <button class="confirm-seats-btn" onclick="closeSeatModal()">Confirm Seats</button>
+                    </div>
+                </div>
             </div>
 
             <button class="confirm-btn" onclick="confirmFinalOrder()">Confirm Order</button>
@@ -53,22 +62,10 @@
             <button id="checkout-btn" onclick="openBookingModal()" disabled>Proceed to Booking</button>
         </div>
     </div>
+
     
-    <div id="seat-selection" style="display:none;">
-        <label>Choose your Seat:</label>
-        <select id="seat-id">
-            <optgroup label="Table 1">
-                <option value="1">Seat 1</option>
-                <option value="2">Seat 2</option>
-                <option value="3">Seat 3</option>
-                <option value="4">Seat 4</option>
-            </optgroup>
-            <optgroup label="Table 2">
-                <option value="5">Seat 1</option>
-                <option value="6">Seat 2</option>
-                </optgroup>
-        </select>
-    </div>
+
+    
 
     <script src="js/booking.js"></script>
 </body>

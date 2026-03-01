@@ -109,33 +109,45 @@ def register_user(user: schema.UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/book-multiple")
 def create_multiple_bookings(data: schema.MultiBookingCreate, db: Session = Depends(get_db)):
-    try:
-        # Loop through the list of IDs sent from the frontend
-        for item_id in data.item_ids:
-            # FIX: Use 'item_id' from the loop and 'data' from the parameter
-            item = db.query(models.FoodItem).filter(models.FoodItem.id == item_id).first()
-            
-            if not item:
-                raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
+    # 1. Calculate allowed meals based on seats picked
+    if data.order_type == "sit-in":
+        allowed_meals = len(data.seat_ids)
+        if allowed_meals == 0:
+            raise HTTPException(status_code=400, detail="Please select at least one seat for sit-in.")
+    else:
+        allowed_meals = 4 # Default limit for take-away
 
-            # Create the booking record
-            new_booking = models.Booking(
-                user_id=data.admission_no,
-                item_id=item_id,
-                scheduled_slot=data.scheduled_slot,
-                order_type=data.order_type,
-                seat_id=data.seat_id
-            )
-            
-            # Update stock
-            item.base_stock -= 1
-            db.add(new_booking)
+    # 2. Count main meals in the cart
+    main_meals_count = 0
+    for i_id in data.item_ids:
+        item = db.query(models.FoodItem).filter(models.FoodItem.id == i_id).first()
+        if item.category in ['meal', 'scalable']:
+            main_meals_count += 1
 
-        db.commit()
-        return {"message": "Order successful!"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+    # 3. Constraint Check
+    if main_meals_count > allowed_meals:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"You reserved {allowed_meals} seat(s) but ordered {main_meals_count} meals."
+        )
+
+    # 4. Save Bookings (Loop through items, and assign seats)
+    # Note: For simplicity, we assign the first seat_id to the first meal, etc.
+    for index, i_id in enumerate(data.item_ids):
+        # Logic to spread items across the selected seats
+        assigned_seat = data.seat_ids[index] if index < len(data.seat_ids) else data.seat_ids[0]
+        
+        new_booking = models.Booking(
+            user_id=data.admission_no,
+            item_id=i_id,
+            scheduled_slot=data.scheduled_slot,
+            order_type=data.order_type,
+            seat_id=assigned_seat if data.order_type == "sit-in" else None
+        )
+        db.add(new_booking)
+    
+    db.commit()
+    return {"message": f"Successfully booked for {allowed_meals} people!"}
 
 @app.get("/available-seats/{slot}")
 def get_available_seats(slot: str, db: Session = Depends(get_db)):

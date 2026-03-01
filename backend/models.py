@@ -15,6 +15,7 @@ class FoodItem(Base):
     price = Column(Integer)
     base_stock = Column(Integer)
     buffer_stock = Column(Integer) 
+    category = Column(String, default="meal")
 
 class Booking(Base):
     __tablename__ = "bookings"
