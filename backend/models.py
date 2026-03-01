@@ -27,3 +27,11 @@ class Booking(Base):
     scheduled_slot = Column(Time) 
     order_type = Column(String) 
     status = Column(String, default="active")
+    seat_id = Column(Integer, ForeignKey("canteen_seats.id"), nullable=True)
+
+class CanteenSeat(Base):
+    __tablename__ = "canteen_seats"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    table_number = Column(Integer, nullable=False)
+    seat_number = Column(Integer, nullable=False)

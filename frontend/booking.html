@@ -17,22 +17,32 @@
     <div id="menu-container">
         </div>
 
-    <div id="booking-modal" style="display:none;">
-        <h3>Finalize Booking</h3>
-        <label>Select Lunch Time:</label>
-        <select id="time-slot">
-            <option value="12:30:00">12:30 PM</option>
-            <option value="13:15:00">1:15 PM</option>
-        </select>
+    <div id="booking-modal" style="display:none;" class="modal">
+        <div class="modal-content">
+            <h2>Finalize Your Order</h2>
+            
+            <label>Select Time Slot:</label>
+            <select id="time-slot" onchange="refreshSeatList()">
+                <option value="12:00:00">12:00 PM</option>
+                <option value="12:30:00">12:30 PM</option>
+                <option value="13:00:00">01:00 PM</option>
+            </select>
 
-        <label>Dining Mode:</label>
-        <select id="order-type">
-            <option value="sit-in">Sit-in</option>
-            <option value="take-away">Take-away</option>
-        </select>
+            <label>Dining Mode:</label>
+            <select id="order-type" onchange="toggleSeatSelection()">
+                <option value="take-away">Take-away</option>
+                <option value="sit-in">Sit-in (Reserve a Seat)</option>
+            </select>
 
-        <button onclick="confirmBooking()">Confirm Order</button>
-        <button onclick="closeModal()">Cancel</button>
+            <div id="seat-selection-area" style="display:none;">
+                <label>Available Seats (4 per table):</label>
+                <select id="seat-id">
+                    </select>
+            </div>
+
+            <button class="confirm-btn" onclick="confirmFinalOrder()">Confirm Order</button>
+            <button onclick="closeModal()">Cancel</button>
+        </div>
     </div>
     <div id="cart-section">
         <h2>Your Cart</h2>
@@ -43,12 +53,23 @@
             <button id="checkout-btn" onclick="openBookingModal()" disabled>Proceed to Booking</button>
         </div>
     </div>
-    <div class="cart-summary">
-        <p>Total: ₹<span id="cart-total">0</span></p>
-        <button id="checkout-btn" onclick="openCheckoutModal()" disabled>
-            Proceed to Booking
-        </button>
+    
+    <div id="seat-selection" style="display:none;">
+        <label>Choose your Seat:</label>
+        <select id="seat-id">
+            <optgroup label="Table 1">
+                <option value="1">Seat 1</option>
+                <option value="2">Seat 2</option>
+                <option value="3">Seat 3</option>
+                <option value="4">Seat 4</option>
+            </optgroup>
+            <optgroup label="Table 2">
+                <option value="5">Seat 1</option>
+                <option value="6">Seat 2</option>
+                </optgroup>
+        </select>
     </div>
+
     <script src="js/booking.js"></script>
 </body>
 </html>

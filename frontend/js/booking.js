@@ -132,40 +132,92 @@ function openCheckoutModal() {
     document.getElementById('booking-modal').style.display = 'block';
 }
 
-async function confirmBooking() {
+async function confirmFinalOrder() {
     const admissionNo = localStorage.getItem("admission_no");
-    const slot = document.getElementById('time-slot').value; // Ensure this is "12:30:00"
+    const slot = document.getElementById('time-slot').value;
     const type = document.getElementById('order-type').value;
+    const seatId = document.getElementById('seat-id').value;
 
-    if (cart.length === 0) return;
-
-    // We will loop through the cart and send each item
-    for (const item of cart) {
-        const payload = {
-            admission_no: admissionNo,
-            item_id: item.id,
-            scheduled_slot: slot,
-            order_type: type
-        };
-
-        console.log("Sending Payload:", payload); // Debugging line
-
-        const response = await fetch('http://127.0.0.1:8000/book', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error("Booking failed for item:", item.name, errorData);
-            alert(`Failed to book ${item.name}: ${errorData.detail}`);
-            return; // Stop if one fails
-        }
+    if (cart.length === 0) {
+        alert("Your cart is empty!");
+        return;
     }
+
+    // Prepare the data to match your 'BookingCreate' schema
+    const payload = {
+        admission_no: admissionNo,
+        item_ids: cart.map(item => item.id), // Sending the whole list
+        scheduled_slot: slot,
+        order_type: type,
+        // Only send seat_id if it's a sit-in order
+        seat_id: type === 'sit-in' ? parseInt(seatId) : null 
+    };
+
+    const response = await fetch('http://127.0.0.1:8000/book-multiple', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (response.ok) {
+        alert("✅ Order Confirmed! See you at " + slot);
+        cart = []; // Clear the cart locally
+        updateCartUI();
+        closeModal();
+        // Optional: Redirect to a 'My Bookings' page
+    } else {
+        const error = await response.json();
+        alert("❌ Failed: " + (error.detail || "Unknown error"));
+    }
+}
 
     alert("All items booked successfully!");
     cart = [];
     updateCartUI();
     closeModal();
+
+
+function toggleSeatSelection() {
+    const type = document.getElementById('order-type').value;
+    const area = document.getElementById('seat-selection-area');
+    
+    if (type === 'sit-in') {
+        area.style.display = 'block';
+        refreshSeatList(); // Load seats immediately
+    } else {
+        area.style.display = 'none';
+    }
+}
+
+async function refreshSeatList() {
+    const slot = document.getElementById('time-slot').value;
+    const seatSelect = document.getElementById('seat-id');
+
+    // 1. Show a 'Loading' state so the user knows something is happening
+    seatSelect.innerHTML = "<option>Loading seats...</option>";
+
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/available-seats/${slot}`);
+        const seats = await response.json();
+
+        // 2. Clear the loading message
+        seatSelect.innerHTML = "";
+
+        // 3. Populate with 4 seats per table logic
+        seats.forEach(seat => {
+            const option = document.createElement('option');
+            option.value = seat.id;
+            option.innerText = `Table ${seat.table_number} - Seat ${seat.seat_number}`;
+            
+            if (seat.is_occupied) {
+                option.disabled = true;
+                option.innerText += " (BOOKED)";
+                option.style.color = "red";
+            }
+            seatSelect.appendChild(option);
+        });
+    } catch (err) {
+        console.error("Failed to fetch seats:", err);
+        seatSelect.innerHTML = "<option>Error loading seats</option>";
+    }
 }

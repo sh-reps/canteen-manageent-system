@@ -13,6 +13,7 @@ class BookingCreate(BaseModel):
     item_id: int
     scheduled_slot: time # e.g., "12:30:00"
     order_type: str # Must be 'sit-in' or 'take-away'
+    seat_id: Optional[int] = None
 
 # What we send back to the user after a booking is made
 class BookingResponse(BaseModel):
@@ -52,3 +53,4 @@ class MultiBookingCreate(BaseModel):
     item_ids: list[int] # List of IDs from the cart
     scheduled_slot: time
     order_type: str
+    seat_id: Optional[int] = None
