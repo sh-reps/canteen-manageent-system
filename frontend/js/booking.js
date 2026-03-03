@@ -1,273 +1,280 @@
-async function confirmBooking() {
-    // Retrieve the logged-in student's ID from browser memory
-    const admissionNo = localStorage.getItem("admission_no");
-    
-    const bookingData = {
-        admission_no: admissionNo,
-        item_id: selectedItemId,
-        scheduled_slot: document.getElementById('time-slot').value,
-        order_type: document.getElementById('order-type').value
-    };
+// ==========================================
+// 1. GLOBAL STATE & CONFIGURATION
+// ==========================================
+let cart = [];
+let selectedSeatIds = [];
+let menuItems = []; // To store items fetched from backend
+let allowedFoodCount = 0;
 
-    const response = await fetch('http://127.0.0.1:8000/book', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bookingData)
-    });
-   
-}
+// ==========================================
+// 2. INITIALIZATION (On Page Load)
+// ==========================================
 document.addEventListener('DOMContentLoaded', () => {
-    // Display the student's Admission Number from local storage
-    const admissionNo = localStorage.getItem("admission_no");
-    document.getElementById('display-admission').innerText = `Welcome, ${admissionNo}`;
-    
-    loadMenu();
+    fetchMenu();
+    // Ensure modal is hidden initially
+    const modal = document.getElementById('seat-modal');
+    if (modal) modal.style.display = 'none';
 });
 
-async function loadMenu() {
-    try {
-        const response = await fetch('http://127.0.0.1:8000/menu');
-        const items = await response.json();
-        const container = document.getElementById('menu-container');
+// ==========================================
+// 3. CORE BOOKING FLOW LOGIC
+// ==========================================
 
-        if (items.length === 0) {
-            container.innerHTML = "<p>No items available for today yet.</p>";
-            return;
-        }
+// Triggered when Dining Mode changes
+function resetAndLock() {
+    const type = document.getElementById('order-type').value;
+    const capacitySection = document.getElementById('capacity-section');
+    const sitInConfig = document.getElementById('sit-in-config');
+    const parcelConfig = document.getElementById('parcel-config');
+    const foodArea = document.getElementById('food-selection-area');
+    
+    // Reset all progress if they switch modes
+    cart = [];
+    selectedSeatIds = [];
+    allowedFoodCount = 0;
+    
+    // UI Reset
+    if (!type) {
+        capacitySection.style.display = 'none';
+        foodArea.style.opacity = "0.5";
+        foodArea.style.pointerEvents = "none";
+        return;
+    }
 
-        // Generate HTML for each food item
-        container.innerHTML = items.map(item => `
-    <div class="food-card">
-        <h3>${item.name}</h3>
-        <p class="price">₹${item.price}</p>
-        <button onclick="addToCart(${item.id}, '${item.name}', ${item.price})">Add to Cart</button>
-    </div>
-`).join('');
-    } catch (error) {
-        console.error("Error loading menu:", error);
+    capacitySection.style.display = 'block';
+    sitInConfig.style.display = (type === 'sit-in') ? 'block' : 'none';
+    parcelConfig.style.display = (type === 'parcel') ? 'block' : 'none';
+    
+    updateLimits(); 
+    renderCart();
+}
+
+// Update the allowed items based on Seats or Parcel Count
+function updateLimits() {
+    const type = document.getElementById('order-type').value;
+    const foodArea = document.getElementById('food-selection-area');
+    
+    if (type === 'sit-in') {
+        allowedFoodCount = selectedSeatIds.length;
+        document.getElementById('seat-status').innerText = `Seats selected: ${allowedFoodCount}`;
+    } else if (type === 'parcel') {
+        allowedFoodCount = parseInt(document.getElementById('parcel-count').value) || 0;
+    }
+
+    document.getElementById('max-items').innerText = allowedFoodCount;
+
+    // Only unlock food if they've set a capacity > 0
+    if (allowedFoodCount > 0) {
+        foodArea.style.opacity = "1";
+        foodArea.style.pointerEvents = "auto";
+    } else {
+        foodArea.style.opacity = "0.5";
+        foodArea.style.pointerEvents = "none";
+        cart = []; // Clear food if they reduce capacity below cart size
+    }
+    
+    validateFinalButton();
+}
+
+// ==========================================
+// 4. SEAT MODAL LOGIC (SIT-IN ONLY)
+// ==========================================
+function toggleSeatUI() {
+    const modal = document.getElementById('seat-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        refreshSeatList();
     }
 }
 
-let selectedItemId = null;
-
-function openBookingModal(itemId, itemName) {
-    selectedItemId = itemId;
-    document.getElementById('booking-modal').style.display = 'block';
-    // You can also update a title in the modal to show the item name
+function closeSeatModal() {
+    document.getElementById('seat-modal').style.display = 'none';
+    updateLimits(); // Refresh the food limit based on final seat count
 }
 
-function closeModal() {
-    document.getElementById('booking-modal').style.display = 'none';
-}
-
-async function placeOrder(itemId) {
-    const admission_no = localStorage.getItem("admission_no"); // Retrieve the ID
+async function refreshSeatList() {
+    const grid = document.getElementById('seat-grid');
     const slot = document.getElementById('time-slot').value;
-    const type = document.getElementById('order-type').value;
+    
+    if (!slot) {
+        grid.innerHTML = "<p>Please select a time slot first.</p>";
+        return;
+    }
 
-    const response = await fetch('http://127.0.0.1:8000/book', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            admission_no: admission_no,
-            item_id: itemId,
-            scheduled_slot: slot,
-            order_type: type
-        })
-    });
+    grid.innerHTML = "Loading...";
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/available-seats/${slot}`);
+        const seats = await response.json();
 
-    const result = await response.json();
-    alert(result.message || result.detail);
+        grid.innerHTML = ""; 
+        seats.forEach(seat => {
+            const box = document.createElement('div');
+            box.className = 'seat-box';
+            box.innerText = `${seat.table_number}-${seat.seat_number}`;
+
+            if (selectedSeatIds.includes(seat.id)) box.classList.add('selected');
+
+            if (seat.is_occupied) {
+                box.classList.add('occupied');
+            } else {
+                box.onclick = () => {
+                    const index = selectedSeatIds.indexOf(seat.id);
+                    if (index > -1) {
+                        selectedSeatIds.splice(index, 1);
+                        box.classList.remove('selected');
+                    } else if (selectedSeatIds.length < 4) {
+                        selectedSeatIds.push(seat.id);
+                        box.classList.add('selected');
+                    } else {
+                        alert("Max 4 seats allowed!");
+                    }
+                    document.getElementById('seat-count-display').innerText = `Selected: ${selectedSeatIds.length}/4`;
+                };
+            }
+            grid.appendChild(box);
+        });
+    } catch (err) {
+        grid.innerHTML = "Error loading seats.";
+    }
 }
 
-//------------------ Cart Management ------------------
-let cart = [];
-function addToCart(id, name, price) {
-    cart.push({ id, name, price });
-    updateCartUI();
-}
-
-function updateCartUI() {
-    const cartList = document.getElementById('cart-items');
-    const totalDisplay = document.getElementById('cart-total');
-    const checkoutBtn = document.getElementById('checkout-btn');
-
-    // 1. Generate the HTML for all items in one go
-    cartList.innerHTML = cart.map((item, index) => {
-        // If it's a scalable item (like Porotta), show the number input
-        if (item.category === 'scalable') {
-            return `
-                <div class="cart-item">
-                    <span>${item.name} (Set) - ₹${item.price}</span>
-                    <div class="qty-controls">
-                        <input type="number" min="2" max="6" value="${item.quantity || 2}" 
-                               onchange="updateQty(${index}, this.value)">
-                        <button onclick="removeFromCart(${index})">❌</button>
-                    </div>
-                </div>`;
+// ==========================================
+// 5. FOOD SELECTION LOGIC
+// ==========================================
+async function fetchMenu() {
+    try {
+        const response = await fetch('http://127.0.0.1:8000/food-items');
+        const data = await response.json();
+        
+        // SAFETY CHECK: Ensure data is an array before setting menuItems
+        if (Array.isArray(data)) {
+            menuItems = data;
+        } else if (data && typeof data === 'object') {
+            // If it's a single object, wrap it in an array
+            menuItems = [data];
+        } else {
+            menuItems = [];
         }
         
-        // Otherwise, show the standard row
-        return `
-            <div class="cart-item">
-                <span>${item.name} - ₹${item.price}</span>
-                <button onclick="removeFromCart(${index})">❌</button>
-            </div>`;
-    }).join('');
-
-    // 2. Update the Total Price (Price * Quantity for scalable items)
-    const total = cart.reduce((sum, item) => {
-        const qty = item.category === 'scalable' ? (item.quantity || 2) : 1;
-        return sum + (item.price * qty);
-    }, 0);
-    totalDisplay.innerText = total;
-
-    // 3. Handle Button State
-    if (cart.length > 0) {
-        checkoutBtn.disabled = false;
-        checkoutBtn.style.backgroundColor = "#2e7d32";
-        checkoutBtn.style.cursor = "pointer";
-    } else {
-        checkoutBtn.disabled = true;
-        checkoutBtn.style.backgroundColor = "#ccc";
-        checkoutBtn.style.cursor = "not-allowed";
+        renderMenu();
+    } catch (err) {
+        console.error("Menu failed to load", err);
+        const container = document.getElementById('cart-items-container');
+        if (container) container.innerHTML = "<p style='color:red;'>Unable to load menu. Check backend connection.</p>";
     }
+}
+
+function renderMenu() {
+    const modalContainer = document.getElementById('cart-items-container');
+    const mainPageContainer = document.getElementById('menu-container');
+
+    if (modalContainer) modalContainer.innerHTML = "";
+    if (mainPageContainer) mainPageContainer.innerHTML = "";
+
+    // Safety check if no items exist
+    if (!menuItems || menuItems.length === 0) {
+        if (mainPageContainer) mainPageContainer.innerHTML = "<p>No items available today.</p>";
+        return;
+    }
+
+    menuItems.forEach(item => {
+        // 1. Fill the main landing page (The big cards)
+        if (mainPageContainer) {
+            const card = document.createElement('div');
+            card.className = 'food-card';
+            card.innerHTML = `
+                <h3>${item.name}</h3>
+                <p class="price">₹${item.price}</p>
+                <button class="plan-btn" onclick="openCartModal()">Plan This Meal</button>
+            `;
+            mainPageContainer.appendChild(card);
+        }
+
+        // 2. Fill the "Add Items" list inside the Planning Modal
+        if (modalContainer) {
+            const row = document.createElement('div');
+            row.className = 'food-item-row';
+            row.innerHTML = `
+                <span>${item.name} (₹${item.price})</span>
+                <button class="add-btn" onclick="addItemToPlan(${item.id}, '${item.name}')">+</button>
+            `;
+            modalContainer.appendChild(row);
+        }
+    });
+}
+
+function addItemToPlan(id, name) {
+    if (cart.length < allowedFoodCount) {
+        cart.push({ id, name });
+        renderCart();
+    } else {
+        alert(`You can only add ${allowedFoodCount} items based on your current selection.`);
+    }
+    validateFinalButton();
+}
+
+function renderCart() {
+    const list = document.getElementById('cart-summary-list');
+    if (!list) return;
+    list.innerHTML = cart.map((item, index) => `
+        <li>${item.name} <button onclick="removeFromCart(${index})">x</button></li>
+    `).join('');
 }
 
 function removeFromCart(index) {
     cart.splice(index, 1);
-    updateCartUI();
+    renderCart();
+    validateFinalButton();
 }
 
-function updateQty(index, newQty) {
-    cart[index].quantity = parseInt(newQty);
-    updateCartUI(); // Refresh the total price
-}
+// ==========================================
+// 6. FINAL VALIDATION & SUBMISSION
+// ==========================================
 
-function openCheckoutModal() {
-    if (cart.length === 0) {
-        alert("Your cart is empty!");
-        return;
+async function checkSlotAvailability() {
+    const slot = document.getElementById('time-slot').value;
+    const type = document.getElementById('order-type').value;
+
+    if (type === 'parcel' && slot) {
+        const response = await fetch(`http://127.0.0.1:8000/check-capacity/${slot}`);
+        const data = await response.json();
+        
+        if (data.remaining <= 0) {
+            alert("This 15-minute slot is full for parcels (Max 25). Please pick another time.");
+            document.getElementById('time-slot').value = ""; 
+        }
     }
-    document.getElementById('booking-modal').style.display = 'block';
+    validateFinalButton();
 }
-//------------------ Final Order Confirmation ------------------
-async function confirmFinalOrder() {
-    // 1. Get the basic order info
-    const timeSlotEl = document.getElementById('time-slot');
-    const orderTypeEl = document.getElementById('order-type');
 
-    // 2. Safety Check: If these don't exist, stop here
-    if (!timeSlotEl || !orderTypeEl) {
-        console.error("Missing critical elements: check IDs for time-slot or order-type");
-        return;
-    }
+function validateFinalButton() {
+    const confirmBtn = document.getElementById('final-confirm');
+    const type = document.getElementById('order-type').value;
+    const slot = document.getElementById('time-slot').value;
 
-    // 3. Prepare the data for the backend
+    let isReady = (slot !== "" && type !== "" && cart.length === allowedFoodCount && allowedFoodCount > 0);
+    confirmBtn.disabled = !isReady;
+}
+
+async function processBooking() {
     const payload = {
         admission_no: localStorage.getItem("admission_no"),
-        item_ids: cart.map(item => item.id),
-        scheduled_slot: timeSlotEl.value,
-        order_type: orderTypeEl.value,
-        // Use our array of selected boxes, or an empty list if take-away
-        seat_ids: orderTypeEl.value === 'sit-in' ? selectedSeatIds : []
+        item_ids: cart.map(i => i.id),
+        scheduled_slot: document.getElementById('time-slot').value,
+        order_type: document.getElementById('order-type').value,
+        seat_ids: selectedSeatIds
     };
 
-    console.log("Sending payload:", payload);
-
-    try {
-        const response = await fetch('http://127.0.0.1:8000/book-multiple', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (response.ok) {
-            alert("✅ Success! Your food and seats are reserved.");
-            cart = []; 
-            location.reload(); // Refresh to clear everything
-        } else {
-            const err = await response.json();
-            alert("❌ Booking Failed: " + (err.detail || "Unknown error"));
-        }
-    } catch (error) {
-        console.error("Fetch Error:", error);
-    }
-}
-   // alert("All items booked successfully!");
-    cart = [];
-    updateCartUI();
-    closeModal();
-
-// seat selection logic
-let selectedSeatIds = [];
-
-async function refreshSeatList() {
-    const slot = document.getElementById('time-slot').value;
-    const grid = document.getElementById('seat-grid');
-    grid.innerHTML = "Loading...";
-
-    const response = await fetch(`http://127.0.0.1:8000/available-seats/${slot}`);
-    const seats = await response.json();
-
-    grid.innerHTML = ""; // Clear loader
-    seats.forEach(seat => {
-        const box = document.createElement('div');
-        box.className = 'seat-box';
-        // Display Table No - Seat No
-        box.innerHTML = `T${seat.table_number}<br>S${seat.seat_number}`;
-
-        if (seat.is_occupied) {
-            box.classList.add('occupied');
-        } else {
-            // Check if this seat was already selected by the user
-            if (selectedSeatIds.includes(seat.id)) box.classList.add('selected');
-            
-            box.onclick = () => {
-                if (selectedSeatIds.includes(seat.id)) {
-                    selectedSeatIds = selectedSeatIds.filter(id => id !== seat.id);
-                    box.classList.remove('selected');
-                } else if (selectedSeatIds.length < 4) {
-                    selectedSeatIds.push(seat.id);
-                    box.classList.add('selected');
-                } else {
-                    alert("Max 4 seats allowed!");
-                }
-                updateSeatCounter();
-            };
-        }
-        grid.appendChild(box);
+    const response = await fetch('http://127.0.0.1:8000/book-multiple', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
     });
-}
 
-function toggleSeatUI() {
-    const orderTypeElement = document.getElementById('order-type');
-    const seatModal = document.getElementById('seat-modal');
-
-    // 1. Check if the elements exist
-    if (!orderTypeElement || !seatModal) {
-        console.error("Critical Error: 'order-type' or 'seat-modal' not found in HTML!");
-        return;
-    }
-
-    const orderType = orderTypeElement.value;
-
-    // 2. Logic to show/hide the pop-up
-    if (orderType === 'sit-in') {
-        seatModal.style.display = 'flex'; // Use 'flex' to center the pop-up
-        refreshSeatList(); // Load the boxes
+    if (response.ok) {
+        alert("Booking Successful!");
+        location.reload();
     } else {
-        seatModal.style.display = 'none';
-        selectedSeatIds = []; // Clear seats if they switch to take-away
-        updateSeatCounter();
+        alert("Booking failed. Please check capacity.");
     }
 }
-
-
-function updateSeatCounter() {
-    document.getElementById('seat-count-display').innerText = `Seats selected: ${selectedSeatIds.length}/4`;
-}
-function closeSeatModal() {
-    document.getElementById('seat-modal').style.display = 'none';
-}
-

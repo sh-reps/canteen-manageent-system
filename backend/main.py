@@ -1,174 +1,177 @@
-from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy.orm import Session
-from .database import get_db
-from . import models, schema 
+from fastapi import APIRouter, FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime, time
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from sqlalchemy.orm import Session
+from typing import List
+from datetime import date
 
-app = FastAPI()
+
+
+# Import your local files
+from . import models, schemas, database
+from .database import engine, get_db
+
+# Create the database tables if they don't exist
+models.Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="Canteen Management System API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"], # Allows all origins, including your Live Server
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"], # Allows GET, POST, etc.
+    allow_headers=["*"], # Allows all headers
 )
 
-@app.post("/login", response_model=schema.LoginResponse) # Using your schema
-def login(user_data: schema.LoginRequest, db: Session = Depends(get_db)):
-    # Look for the user in the database
-    user = db.query(models.User).filter(
-        models.User.admission_no == user_data.admission_no
-    ).first()
-    
-    # Check if user exists and password matches
-    if not user or user.password != user_data.password:
-        raise HTTPException(status_code=401, detail="Invalid Admission Number or Password")
-    
-    return {
-        "admission_no": user.admission_no, 
-        "role": user.role, 
-        "message": "Login successful"
-    }
+# ==========================================
+# 1. MENU & SEAT FETCHING ENDPOINTS
+# ==========================================
 
-@app.get("/menu")
-def get_menu(db: Session = Depends(get_db)):
-    # Fetch all items from the food_items table
-    items = db.query(models.FoodItem).all()
-    return items
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    print(f"VALIDATION ERROR: {exc.errors()}") # This shows the exact field failing in your terminal
+    return JSONResponse(status_code=400, content={"detail": exc.errors()})
 
-@app.post("/book")
-def create_booking(booking: schema.BookingCreate, db: Session = Depends(get_db)):
-    #  Check the 10:00 AM Deadline
-    now_time = datetime.now().time()
-    deadline = time(23, 0, 0)
-    
-    if now_time > deadline:
-        raise HTTPException(
-            status_code=400, 
-            detail="Same-day bookings are closed. Please book before 10:00 AM."
-        )
+# Add this to your backend/main.py
 
-    # Check if stock is available
-    item = db.query(models.FoodItem).filter(models.FoodItem.id == booking.item_id).first()
-    if item.base_stock <= 0:
-        raise HTTPException(status_code=400, detail="Item out of stock!")
-
-    if booking.order_type == "sit-in":
-        # Check if this exact seat is already taken for this time slot
-        is_taken = db.query(models.Booking).filter(
-            models.Booking.seat_id == booking.seat_id,
-            models.Booking.scheduled_slot == booking.scheduled_slot,
-            models.Booking.status == "active"
-        ).first()
-
-        if is_taken:
-            raise HTTPException(status_code=400, detail="This seat is already reserved for this time.")
-
-    new_booking = models.Booking(
-        user_id=booking.admission_no,
-        item_id=booking.item_id,
-        scheduled_slot=booking.scheduled_slot,
-        order_type=booking.order_type,
-        seat_id=booking.seat_id if booking.order_type == "sit-in" else None
-    )
-    
-    db.add(new_booking)
-    db.commit()
-    return {"message": "Success! Seat reserved."}
-
-    
-    
-    # 4. Reduce base stock
-    item.base_stock -= 1
-    
-    db.add(new_booking)
-    db.commit()
-    return {"message": "Order placed successfully!"}
-
-@app.post("/register", response_model=schema.UserResponse)
-def register_user(user: schema.UserCreate, db: Session = Depends(get_db)):
-    #Check if the Admission Number already exists
-    db_user = db.query(models.User).filter(models.User.admission_no == user.admission_no).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Admission Number already registered")
-
-    # Create the new user object
-    new_user = models.User(
-        admission_no=user.admission_no,
-        password=user.password, # Note: In a real app, you'd hash this!
-        role=user.role
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    # This prints the SPECIFIC reason for the 400 error in your terminal
+    print(f"❌ VALIDATION ERROR: {exc.errors()}") 
+    return JSONResponse(
+        status_code=400,
+        content={"detail": exc.errors(), "body": exc.body}
     )
 
-    # Save to Supabase
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
 
-@app.post("/book-multiple")
-def create_multiple_bookings(data: schema.MultiBookingCreate, db: Session = Depends(get_db)):
-    # 1. Calculate allowed meals based on seats picked
-    if data.order_type == "sit-in":
-        allowed_meals = len(data.seat_ids)
-        if allowed_meals == 0:
-            raise HTTPException(status_code=400, detail="Please select at least one seat for sit-in.")
-    else:
-        allowed_meals = 4 # Default limit for take-away
 
-    # 2. Count main meals in the cart
-    main_meals_count = 0
-    for i_id in data.item_ids:
-        item = db.query(models.FoodItem).filter(models.FoodItem.id == i_id).first()
-        if item.category in ['meal', 'scalable']:
-            main_meals_count += 1
-
-    # 3. Constraint Check
-    if main_meals_count > allowed_meals:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"You reserved {allowed_meals} seat(s) but ordered {main_meals_count} meals."
-        )
-
-    # 4. Save Bookings (Loop through items, and assign seats)
-    # Note: For simplicity, we assign the first seat_id to the first meal, etc.
-    for index, i_id in enumerate(data.item_ids):
-        # Logic to spread items across the selected seats
-        assigned_seat = data.seat_ids[index] if index < len(data.seat_ids) else data.seat_ids[0]
-        
-        new_booking = models.Booking(
-            user_id=data.admission_no,
-            item_id=i_id,
-            scheduled_slot=data.scheduled_slot,
-            order_type=data.order_type,
-            seat_id=assigned_seat if data.order_type == "sit-in" else None
-        )
-        db.add(new_booking)
-    
-    db.commit()
-    return {"message": f"Successfully booked for {allowed_meals} people!"}
+@app.get("/food-items", response_model=List[schemas.FoodItem])
+def get_all_food(db: Session = Depends(get_db)):
+    """Fetch all available food items for the menu."""
+    return db.query(models.FoodItem).all()
 
 @app.get("/available-seats/{slot}")
-def get_available_seats(slot: str, db: Session = Depends(get_db)):
-    # 1. Fetch all seats (the 4 seats per table we created)
-    all_seats = db.query(models.CanteenSeat).all()
+def get_seats_by_slot(slot: str, db: Session = Depends(get_db)):
+    """
+    Fetch all seats and their occupancy status for a specific time slot.
+    Returns a list of seats with an 'is_occupied' boolean.
+    """
+    # Fetch all seats
+    all_seats = db.query(models.Seat).all()
     
-    # 2. Find which ones are already booked for this specific time
-    occupied_seat_ids = db.query(models.Booking.seat_id).filter(
-        models.Booking.scheduled_slot == slot,
-        models.Booking.status == "active"
+    # Check which seats are reserved for THIS slot on THIS day
+    reserved_seat_ids = db.query(models.SeatReservation.seat_id).filter(
+        models.SeatReservation.time_slot == slot,
+        models.SeatReservation.reservation_date == date.today()
     ).all()
     
-    # Flatten list: [(1,), (2,)] -> [1, 2]
-    occupied_list = [s[0] for s in occupied_seat_ids]
-
-    # 3. Return the status of every seat
+    # Flatten the list of IDs
+    occupied_ids = [r[0] for r in reserved_seat_ids]
+    
+    # Return formatted list for the frontend circles
     return [
         {
             "id": seat.id,
             "table_number": seat.table_number,
             "seat_number": seat.seat_number,
-            "is_occupied": seat.id in occupied_list
+            "is_occupied": seat.id in occupied_ids
         } for seat in all_seats
     ]
+
+# ==========================================
+# 2. CORE BOOKING LOGIC (THE TRANSACTION)
+# ==========================================
+
+
+
+
+router = APIRouter()
+get_db = database.get_db
+
+@app.post("/book-multiple", status_code=status.HTTP_201_CREATED)
+def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depends(get_db)):
+    # 1. Debug Logs to verify incoming data
+    print(f"DEBUG: Incoming booking data -> {booking_data}")
+    
+    # 2. Find the User using 'admission_no' (NOT 'id')
+    user = db.query(models.User).filter(
+        models.User.admission_no == booking_data.admission_no
+    ).first()
+    
+    if not user:
+        print(f"❌ ERROR: User {booking_data.admission_no} not found")
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        # 3. Create the Main Booking Record
+        new_booking = models.Booking(
+            user_id=user.admission_no, # FIXED: Uses admission_no instead of id
+            scheduled_slot=booking_data.scheduled_slot, # Accepts the string '12:00:00'
+            order_type=booking_data.order_type,
+            booking_date=date.today(),
+            status="confirmed"
+        )
+        db.add(new_booking)
+        db.flush() # Flushes to generate new_booking.id for child tables
+
+        # 4. Save Multiple Food Items to 'booked_items' table
+        for f_id in booking_data.item_ids:
+            booked_item = models.BookedItem(
+                booking_id=new_booking.id,
+                food_item_id=f_id
+            )
+            db.add(booked_item)
+
+        # 5. Handle Seat Reservations if it's a 'sit-in' order
+        if booking_data.order_type == "sit-in":
+            if not booking_data.seat_ids:
+                raise Exception("Seat selection is required for Sit-in orders.")
+            
+            for s_id in booking_data.seat_ids:
+                # Check if seat is already reserved for this slot/day
+                already_taken = db.query(models.SeatReservation).filter(
+                    models.SeatReservation.seat_id == s_id,
+                    models.SeatReservation.time_slot == booking_data.scheduled_slot,
+                    models.SeatReservation.reservation_date == date.today()
+                ).first()
+
+                if already_taken:
+                    raise Exception(f"Seat {s_id} was just taken. Please pick another.")
+
+                res = models.SeatReservation(
+                    seat_id=s_id,
+                    booking_id=new_booking.id,
+                    time_slot=booking_data.scheduled_slot,
+                    reservation_date=date.today()
+                )
+                db.add(res)
+
+        # 6. Commit the entire transaction
+        db.commit()
+        db.refresh(new_booking)
+        print(f"✅ SUCCESS: Booking {new_booking.id} created for {user.admission_no}")
+        return {"message": "Booking successful!", "booking_id": new_booking.id}
+
+    except Exception as e:
+        db.rollback()
+        # This will now print the exact error (like table mismatches)
+        print(f"❌ DATABASE ERROR: {str(e)}") 
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ==========================================
+# 3. AUTHENTICATION PLACEHOLDERS
+# ==========================================
+
+@app.post("/login")
+def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(
+        models.User.admission_no == user_data.admission_no,
+        models.User.password == user_data.password
+    ).first()
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid Credentials")
+        
+    return {"message": "Success", "admission_no": user.admission_no}

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Time
+from sqlalchemy import Column, Integer, String, DateTime, Time, ForeignKey, Date
 from .database import Base
 from datetime import datetime
 
@@ -13,26 +13,34 @@ class FoodItem(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     price = Column(Integer)
-    base_stock = Column(Integer)
-    buffer_stock = Column(Integer) 
     category = Column(String, default="meal")
 
 class Booking(Base):
     __tablename__ = "bookings"
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, ForeignKey("users.admission_no"))
-    item_id = Column(Integer, ForeignKey("food_items.id"))
-    booking_time = Column(DateTime, default=datetime.utcnow)
-    
-    
-    scheduled_slot = Column(Time) 
-    order_type = Column(String) 
-    status = Column(String, default="active")
-    seat_id = Column(Integer, ForeignKey("canteen_seats.id"), nullable=True)
+    booking_date = Column(Date, default=datetime.utcnow().date())
+    scheduled_slot = Column(String, nullable=False)
+    order_type = Column(String) # 'sit-in' or 'parcel'
+    status = Column(String, default="confirmed")
 
-class CanteenSeat(Base):
-    __tablename__ = "canteen_seats"
-    
+# This replaces the 'item_id' column in Bookings to allow 1-to-many items
+class BookedItem(Base):
+    __tablename__ = "booked_items"
     id = Column(Integer, primary_key=True, index=True)
-    table_number = Column(Integer, nullable=False)
-    seat_number = Column(Integer, nullable=False)
+    booking_id = Column(Integer, ForeignKey("bookings.id"))
+    food_item_id = Column(Integer, ForeignKey("food_items.id"))
+
+class Seat(Base):
+    __tablename__ = "seats" 
+    id = Column(Integer, primary_key=True, index=True)
+    table_number = Column(Integer)
+    seat_number = Column(Integer)
+
+class SeatReservation(Base):
+    __tablename__ = "seat_reservations"
+    id = Column(Integer, primary_key=True, index=True)
+    seat_id = Column(Integer, ForeignKey("seats.id"))
+    booking_id = Column(Integer, ForeignKey("bookings.id"))
+    time_slot = Column(String)
+    reservation_date = Column(Date)

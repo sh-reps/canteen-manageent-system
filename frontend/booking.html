@@ -2,71 +2,129 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Book Your Lunch</title>
-    <link rel="stylesheet" href="css/style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canteen - Plan Your Meal</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
-    <nav>
-        <span id="display-admission"></span>
-        <button onclick="logout()">Logout</button>
+
+    <nav class="navbar">
+        <div class="nav-left">
+            <span class="logo">🍴 College Canteen</span>
+            <span id="display-admission" class="user-badge"></span>
+        </div>
+        <button class="logout-btn" onclick="logout()">Logout</button>
     </nav>
 
-    <h1>Today's Menu</h1>
-    <p id="time-warning" style="color: orange; font-weight: bold;"></p>
+    <main class="container">
+        <header class="page-header">
+            <h1>Today's Menu</h1>
+            <p class="subtitle">Select your items and click the cart to finalize your plan.</p>
+        </header>
 
-    <div id="menu-container">
-        </div>
+        <div id="menu-container" class="menu-grid">
+            </div>
+    </main>
 
-    <div id="booking-modal" style="display:none;" class="modal">
-        <div class="modal-content">
-            <h2>Finalize Your Order</h2>
-            
-            <label>Select Time Slot:</label>
-            <select id="time-slot" onchange="refreshSeatList()">
-                <option value="12:00:00">12:00 PM</option>
-                <option value="12:30:00">12:30 PM</option>
-                <option value="13:00:00">01:00 PM</option>
-            </select>
+    <div id="floating-cart" onclick="openCartModal()">
+        <i class="fas fa-shopping-basket"></i>
+        <span id="cart-counter" class="badge">0</span>
+    </div>
 
-            <label>Dining Mode:</label>
-            <select id="order-type" onchange="toggleSeatUI()">
-                <option value="take-away">Take-away</option>
-                <option value="sit-in">Sit-in (Pick Seats)</option>
-            </select>
+    <div id="cart-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content booking-card">
+            <div class="modal-header">
+                <h2><i class="fas fa-clipboard-list"></i> Your Booking Plan</h2>
+                <span class="close-x" onclick="closeCartModal()">&times;</span>
+            </div>
 
-            <div id="seat-modal" class="modal-overlay" style="display:none;">
-                <div id="seat-selection-area" class="modal-content"> <span class="close-btn" onclick="closeSeatModal()">&times;</span>
-                    <h3>Canteen Seating Map</h3>
-                    <p>Select up to 4 seats.</p>
-                    
-                    <div id="seat-grid" class="seat-grid">
-                        </div>
+            <div class="form-group">
+                <label>Dining Mode</label>
+                <select id="order-type" onchange="resetAndLock()">
+                    <option value="">Select Mode...</option>
+                    <option value="sit-in">Sit-in (Reserve Seats)</option>
+                    <option value="parcel">Parcel (Take-away)</option>
+                </select>
+                
+                <label>Time Slot</label>
+                <select id="time-slot" onchange="checkSlotAvailability()">
+                    <option value="">Choose Time...</option>
+                    <option value="12:00:00">12:00 PM</option>
+                    <option value="12:15:00">12:15 PM</option>
+                    <option value="12:30:00">12:30 PM</option>
+                    <option value="12:45:00">12:45 PM</option>
+                    <option value="13:00:00">01:00 PM</option>
+                </select>
+            </div>
 
-                    <div class="modal-footer">
-                        <span id="seat-count-display">Seats selected: 0/4</span>
-                        <button class="confirm-seats-btn" onclick="closeSeatModal()">Confirm Seats</button>
+            <div id="capacity-section" style="display:none;" class="form-group highlight-box">
+                <div id="sit-in-config" style="display:none;">
+                    <button class="btn-action" onclick="toggleSeatUI()">
+                        <i class="fas fa-chair"></i> Select Canteen Seats
+                    </button>
+                    <p id="seat-status" class="status-msg">Seats selected: 0</p>
+                </div>
+                
+                <div id="parcel-config" style="display:none;">
+                    <label>Number of People (Max 4):</label>
+                    <input type="number" id="parcel-count" min="1" max="4" value="1" onchange="updateLimits()">
+                </div>
+            </div>
+
+            <div id="food-selection-area" class="locked-section">
+                <h4>Add Food (Limit: <span id="max-items">0</span>)</h4>
+                <div id="cart-items-container" class="scroll-menu">
+                    </div>
+                
+                <div class="summary-box">
+                    <h4>Selected Items:</h4>
+                    <ul id="cart-summary-list"></ul>
+                    <div class="total-bar">
+                        <strong>Total: ₹<span id="total-val">0</span></strong>
                     </div>
                 </div>
             </div>
 
-            <button class="confirm-btn" onclick="confirmFinalOrder()">Confirm Order</button>
-            <button onclick="closeModal()">Cancel</button>
+            <button id="final-confirm" class="btn-confirm" disabled onclick="processBooking()">
+                Confirm & Pay
+            </button>
         </div>
     </div>
-    <div id="cart-section">
-        <h2>Your Cart</h2>
-        <div id="cart-items">
+
+    <div id="seat-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content seat-picker">
+            <div class="modal-header">
+                <h3>Canteen Seating Map</h3>
+                <span class="close-btn" onclick="closeSeatModal()">&times;</span>
             </div>
-        <div class="cart-summary">
-            <p>Total: ₹<span id="cart-total">0</span></p>
-            <button id="checkout-btn" onclick="openBookingModal()" disabled>Proceed to Booking</button>
+            <p class="legend">Blue: Available | Gray: Occupied</p>
+            
+            <div id="seat-grid" class="seat-grid"></div>
+            
+            <div class="seat-footer">
+                <p id="seat-count-display">Selected: 0/4</p>
+                <button class="btn-confirm" onclick="closeSeatModal()">Confirm Selection</button>
+            </div>
         </div>
     </div>
-
-    
-
-    
 
     <script src="js/booking.js"></script>
+    <script>
+        // Simple UI helper to open/close the modal
+        function openCartModal() {
+            document.getElementById('cart-modal').style.display = 'flex';
+        }
+        function closeCartModal() {
+            document.getElementById('cart-modal').style.display = 'none';
+        }
+        function logout() {
+            localStorage.clear();
+            window.location.href = 'index.html';
+        }
+        // Show admission number on load
+        document.getElementById('display-admission').innerText = localStorage.getItem('admission_no') || 'Guest';
+    </script>
+
 </body>
 </html>

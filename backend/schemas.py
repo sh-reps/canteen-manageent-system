@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime, time
 from typing import List, Optional
 
@@ -10,11 +10,12 @@ class LoginRequest(BaseModel):
 # Data needed to create a new Booking
 class BookingCreate(BaseModel):
     admission_no: str
-    item_id: int
-    scheduled_slot: time # e.g., "12:30:00"
-    order_type: str # Must be 'sit-in' or 'take-away'
-    seat_id: Optional[int] = None
+    item_ids: List[int]        
+    scheduled_slot: str
+    order_type: str            
+    seat_ids: Optional[List[int]] = []
 
+    
 # What we send back to the user after a booking is made
 class BookingResponse(BaseModel):
     id: int
@@ -47,6 +48,28 @@ class LoginResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class FoodItem(BaseModel):
+    id: int
+    name: str
+    price: int
+    category: Optional[str] = "meal"
+
+    class Config:
+        from_attributes = True
+
+# Add this: Main.py needs this for the /login endpoint
+class UserLogin(BaseModel):
+    admission_no: str
+    password: str
+
+# Ensure this matches what main.py expects for /book-multiple
+class BookingCreate(BaseModel):
+    admission_no: str
+    item_ids: List[int]
+    scheduled_slot: str
+    order_type: str
+    seat_ids: Optional[List[int]] = []
 
 class MultiBookingCreate(BaseModel):
     admission_no: str
