@@ -1,10 +1,14 @@
+import os
+
 from fastapi import APIRouter, FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
-from sqlalchemy.orm import Session
+from fastapi.staticfiles import StaticFiles
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session, joinedload
 from typing import List
-from datetime import date
+from datetime import date, datetime
 
 
 
@@ -24,6 +28,36 @@ app.add_middleware(
     allow_methods=["*"], # Allows GET, POST, etc.
     allow_headers=["*"], # Allows all headers
 )
+
+
+import os
+from fastapi.staticfiles import StaticFiles
+
+# Absolute path of the backend folder
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Point to the frontend folder
+FRONTEND_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "frontend"))
+
+# DEBUG: Check if the folder actually exists
+if not os.path.exists(FRONTEND_DIR):
+    print(f"❌ ERROR: Frontend directory NOT FOUND at: {FRONTEND_DIR}")
+else:
+    print(f"✅ SUCCESS: Frontend directory found at: {FRONTEND_DIR}")
+    # Check if style.css is where we think it is
+    css_path = os.path.join(FRONTEND_DIR, "css", "style.css")
+    print(f"🔍 Checking for CSS at: {css_path} -> {'Found' if os.path.exists(css_path) else 'NOT FOUND'}")
+
+app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+# serrving pages logic
+@app.get("/")
+async def serve_login():
+    # This must point to where your login.html actually lives
+    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+@app.get("/booking")
+async def serve_booking():
+    return FileResponse(os.path.join(FRONTEND_DIR, "booking.html"))
 
 # ==========================================
 # 1. MENU & SEAT FETCHING ENDPOINTS
@@ -93,6 +127,9 @@ get_db = database.get_db
 @app.post("/book-multiple", status_code=status.HTTP_201_CREATED)
 def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depends(get_db)):
     # 1. Debug Logs to verify incoming data
+    current_time_str = datetime.now().strftime("%H:%M")
+    booking_cutoff = "16:00"
+
     print(f"DEBUG: Incoming booking data -> {booking_data}")
     
     # 2. Find the User using 'admission_no' (NOT 'id')
@@ -103,7 +140,15 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
     if not user:
         print(f"❌ ERROR: User {booking_data.admission_no} not found")
         raise HTTPException(status_code=404, detail="User not found")
-
+    
+    
+    # 2. String comparison for the constraint
+    if current_time_str > booking_cutoff:
+        raise HTTPException(
+            status_code=400, 
+            detail="Pre-bookings for today close at 10:00 AM. kindly check walk-in options."
+        )
+    
     try:
         # 3. Create the Main Booking Record
         new_booking = models.Booking(
@@ -164,6 +209,16 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
 # 3. AUTHENTICATION PLACEHOLDERS
 # ==========================================
 
+@app.post("/register", status_code=status.HTTP_201_CREATED)
+def register_user(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
+    exists = db.query(models.User).filter(models.User.admission_no == user_data.admission_no).first()
+    if exists:
+        raise HTTPException(status_code=400, detail="Admission number already registered")
+    new_user = models.User(admission_no=user_data.admission_no, password=user_data.password)
+    db.add(new_user)
+    db.commit()
+    return {"message": "Success"}
+
 @app.post("/login")
 def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(
@@ -175,3 +230,36 @@ def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid Credentials")
         
     return {"message": "Success", "admission_no": user.admission_no}
+
+#==========================================
+#  ORDER HISTORY ENDPOINT 
+
+@app.get("/order-history/{admission_no}")
+def get_order_history(admission_no: str, db: Session = Depends(get_db)):
+    history = db.query(models.Booking).options(
+        # Load food items and their names
+        joinedload(models.Booking.items).joinedload(models.BookedItem.food_item),
+        # Load seat reservations and the actual seat numbers
+        joinedload(models.Booking.booked_seats).joinedload(models.SeatReservation.seat)
+    ).filter(
+        models.Booking.user_id == admission_no
+    ).order_by(models.Booking.booking_date.desc()).all()
+    
+    return history
+
+@app.get("/history") # Route to serve the HTML page
+async def serve_history():
+    return FileResponse(os.path.join(FRONTEND_DIR, "history.html"))
+
+
+#==========================================
+# Check capacity endpoint
+#==========================================
+@app.get("/check-capacity/{slot}")
+def check_capacity(slot: str, db: Session = Depends(get_db)):
+    booked_count = db.query(models.SeatReservation).filter(
+        models.SeatReservation.time_slot == slot,
+        models.SeatReservation.reservation_date == date.today()
+    ).count()
+    # Ensure this returns 'remaining' so booking.js can read it
+    return {"slot": slot, "remaining": max(0, 50 - booked_count)}

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Canteen - Plan Your Meal</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="/static/css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
@@ -17,13 +17,18 @@
         <button class="logout-btn" onclick="logout()">Logout</button>
     </nav>
 
+    <nav>
+        <a href="/booking">New Booking</a>
+        <a href="/history">Order History</a>
+    </nav>
+
     <main class="container">
         <header class="page-header">
             <h1>Today's Menu</h1>
             <p class="subtitle">Select your items and click the cart to finalize your plan.</p>
         </header>
 
-        <div id="menu-container" class="menu-grid">
+        <div id="menu-container" class="menu-grid" >
             </div>
     </main>
 
@@ -48,7 +53,7 @@
                 </select>
                 
                 <label>Time Slot</label>
-                <select id="time-slot" onchange="checkSlotAvailability()">
+                <<select id="time-slot" onchange="checkSlotAvailability(); renderMenu();">
                     <option value="">Choose Time...</option>
                     <option value="12:00:00">12:00 PM</option>
                     <option value="12:15:00">12:15 PM</option>
@@ -109,7 +114,18 @@
         </div>
     </div>
 
-    <script src="js/booking.js"></script>
+    <div id="portion-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content booking-card">
+            <h3>Select Portion</h3>
+            <p>Choose your portion size for this item:</p>
+            <div class="btn-group" style="display: flex; gap: 10px; margin-top: 15px;">
+                <button id="half-btn" class="btn-action">Half Portion</button>
+                <button id="full-btn" class="btn-confirm">Full Portion</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/booking.js"></script>
     <script>
         // Simple UI helper to open/close the modal
         function openCartModal() {
@@ -120,11 +136,12 @@
         }
         function logout() {
             localStorage.clear();
-            window.location.href = 'index.html';
+            window.location.href = '/';
         }
         // Show admission number on load
         document.getElementById('display-admission').innerText = localStorage.getItem('admission_no') || 'Guest';
     </script>
+
 
 </body>
 </html>

@@ -5,12 +5,15 @@ let cart = [];
 let selectedSeatIds = [];
 let menuItems = []; // To store items fetched from backend
 let allowedFoodCount = 0;
+const SIT_IN_SLOTS = ["12:00:00", "12:25:00", "12:50:00", "13:15:00"]; // Match backend format
 
 // ==========================================
 // 2. INITIALIZATION (On Page Load)
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
     fetchMenu();
+    resetAndLock();
+   
     // Ensure modal is hidden initially
     const modal = document.getElementById('seat-modal');
     if (modal) modal.style.display = 'none';
@@ -21,33 +24,57 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==========================================
 
 // Triggered when Dining Mode changes
+// Update this function in your booking.js
+
 function resetAndLock() {
     const type = document.getElementById('order-type').value;
+    const timeSlotPicker = document.getElementById('time-slot');
     const capacitySection = document.getElementById('capacity-section');
     const sitInConfig = document.getElementById('sit-in-config');
-    const parcelConfig = document.getElementById('parcel-config');
-    const foodArea = document.getElementById('food-selection-area');
-    
-    // Reset all progress if they switch modes
+
+    // Reset state
     cart = [];
     selectedSeatIds = [];
     allowedFoodCount = 0;
-    
-    // UI Reset
-    if (!type) {
-        capacitySection.style.display = 'none';
-        foodArea.style.opacity = "0.5";
-        foodArea.style.pointerEvents = "none";
-        return;
+
+    // Clear and refill the Time Slot dropdown
+    timeSlotPicker.innerHTML = '<option value="">Choose Time...</option>';
+
+    if (type === 'sit-in') {
+        const sitInSlots = ["12:00", "12:25", "12:50", "13:15"];
+        sitInSlots.forEach(time => {
+            let opt = document.createElement('option');
+            opt.value = time;
+            opt.text = `${time} - ${calculateEndTime(time)}`;
+            timeSlotPicker.appendChild(opt);
+        });
+        sitInConfig.style.display = 'block';
+        document.getElementById('sit-in-config').style.display = 'block';
+        document.getElementById('parcel-config').style.display = 'none';
+    } else if (type === 'parcel') {
+        // Keep your 15-min intervals for parcels if you like
+        const parcelSlots = ["12:00", "12:15", "12:30", "12:45", "13:00", "13:15", "13:30"];
+        parcelSlots.forEach(time => {
+            let opt = document.createElement('option');
+            opt.value = time;
+            opt.text = time;
+            timeSlotPicker.appendChild(opt);
+        });
+        document.getElementById('sit-in-config').style.display = 'none';
+        document.getElementById('parcel-config').style.display = 'block';
     }
 
-    capacitySection.style.display = 'block';
-    sitInConfig.style.display = (type === 'sit-in') ? 'block' : 'none';
-    parcelConfig.style.display = (type === 'parcel') ? 'block' : 'none';
-    
+    capacitySection.style.display = type ? 'block' : 'none';
     updateLimits(); 
     renderCart();
 }
+
+function calculateEndTime(startTime) {
+    const [h, m] = startTime.split(':').map(Number);
+    let newM = m + 25;
+    return `${h}:${newM === 60 ? '00' : newM}`;
+}
+
 
 // Update the allowed items based on Seats or Parcel Count
 function updateLimits() {
@@ -146,70 +173,127 @@ async function fetchMenu() {
         const response = await fetch('http://127.0.0.1:8000/food-items');
         const data = await response.json();
         
-        // SAFETY CHECK: Ensure data is an array before setting menuItems
-        if (Array.isArray(data)) {
-            menuItems = data;
-        } else if (data && typeof data === 'object') {
-            // If it's a single object, wrap it in an array
-            menuItems = [data];
-        } else {
-            menuItems = [];
-        }
+        menuItems = Array.isArray(data) ? data : [data];
         
-        renderMenu();
+        // This is the key: call renderMenu() only after menuItems is populated
+        renderMenu(); 
     } catch (err) {
         console.error("Menu failed to load", err);
-        const container = document.getElementById('cart-items-container');
-        if (container) container.innerHTML = "<p style='color:red;'>Unable to load menu. Check backend connection.</p>";
     }
 }
 
 function renderMenu() {
     const modalContainer = document.getElementById('cart-items-container');
     const mainPageContainer = document.getElementById('menu-container');
+    const slot = document.getElementById('time-slot').value;
 
+    // Clear previous views
     if (modalContainer) modalContainer.innerHTML = "";
     if (mainPageContainer) mainPageContainer.innerHTML = "";
 
-    // Safety check if no items exist
-    if (!menuItems || menuItems.length === 0) {
-        if (mainPageContainer) mainPageContainer.innerHTML = "<p>No items available today.</p>";
+    // Determine Meal Type based on current real-world time if no slot is selected
+    let currentMealType;
+    if (slot) {
+        const hour = parseInt(slot.split(':')[0]);
+        currentMealType = (hour >= 11) ? 'lunch' : 'breakfast';
+    } else {
+        const now = new Date();
+        currentMealType = (now.getHours() >= 11) ? 'lunch' : 'breakfast';
+    }
+
+    const filteredItems = menuItems.filter(item => item.meal_type === currentMealType);
+
+    // 1. RENDER MAIN PAGE (Works even without a slot selected)
+    if (mainPageContainer) {
+        if (filteredItems.length === 0) {
+            mainPageContainer.innerHTML = `<p>No ${currentMealType} items available right now.</p>`;
+        } else {
+            filteredItems.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'food-card';
+                card.innerHTML = `
+                    <h3>${item.name}</h3>
+                    <p class="price">₹${item.price_full}</p>
+                    <button class="plan-btn" onclick="openCartModal()">Plan This Meal</button>
+                `;
+                mainPageContainer.appendChild(card);
+            });
+        }
+    }
+
+    // 2. RENDER PLANNING MODAL (Strictly requires a slot)
+    if (modalContainer) {
+        if (!slot) {
+            modalContainer.innerHTML = "<p class='status-msg'>Please select a time slot first to add items.</p>";
+        } else {
+            filteredItems.forEach(item => {
+                const row = document.createElement('div');
+                row.className = 'food-item-row';
+                row.innerHTML = `
+                    <div class="item-details">
+                        <span class="item-name">${item.name} (₹${item.price_full})</span>
+                        <span class="item-meta">${item.category}</span>
+                    </div>
+                    <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})'>+</button>
+                `;
+                modalContainer.appendChild(row);
+            });
+        }
+    }
+}
+// Updated logic for Breakfast/Lunch and Category constraints
+function addItemToPlan(item) {
+    const mealCount = cart.filter(i => i.category === 'meal').length;
+    const curryCount = cart.filter(i => i.category === 'curry').length;
+    const sideCount = cart.filter(i => i.category === 'side').length;
+
+    // 1. Capacity Check: Seats reserved define the max meals
+    if (item.category === 'meal' && mealCount >= allowedFoodCount) {
+        alert(`You have reserved ${allowedFoodCount} seats. Max ${allowedFoodCount} meals allowed.`);
         return;
     }
 
-    menuItems.forEach(item => {
-        // 1. Fill the main landing page (The big cards)
-        if (mainPageContainer) {
-            const card = document.createElement('div');
-            card.className = 'food-card';
-            card.innerHTML = `
-                <h3>${item.name}</h3>
-                <p class="price">₹${item.price}</p>
-                <button class="plan-btn" onclick="openCartModal()">Plan This Meal</button>
-            `;
-            mainPageContainer.appendChild(card);
-        }
+    // 2. Dependency Check: Must have a Meal before adding Curry or Side
+    if (mealCount === 0 && (item.category === 'curry' || item.category === 'side')) {
+        alert("Please add a Main Meal (e.g., Rice, Biriyani, or Appam) first!");
+        return;
+    }
 
-        // 2. Fill the "Add Items" list inside the Planning Modal
-        if (modalContainer) {
-            const row = document.createElement('div');
-            row.className = 'food-item-row';
-            row.innerHTML = `
-                <span>${item.name} (₹${item.price})</span>
-                <button class="add-btn" onclick="addItemToPlan(${item.id}, '${item.name}')">+</button>
-            `;
-            modalContainer.appendChild(row);
-        }
-    });
+    // 3. Ratio Check: 1 Curry and 1 Side per Meal
+    if (item.category === 'curry' && curryCount >= mealCount) {
+        alert("You can only add one Curry per Meal selected.");
+        return;
+    }
+    if (item.category === 'side' && sideCount >= mealCount) {
+        alert("You can only add one Side Dish per Meal selected.");
+        return;
+    }
+
+    // 4. Portion Logic
+    if (item.has_portions) {
+        openPortionModal(item); // Pops up Half/Full options
+    } else {
+        addToCart(item.id, item.name, 'Full', item.price_full, item.category); // Fixed items like Omelette
+    }
 }
 
-function addItemToPlan(id, name) {
-    if (cart.length < allowedFoodCount) {
-        cart.push({ id, name });
-        renderCart();
-    } else {
-        alert(`You can only add ${allowedFoodCount} items based on your current selection.`);
-    }
+function openPortionModal(item) {
+    const modal = document.getElementById('portion-modal'); // Make sure this exists in your HTML!
+    modal.style.display = 'flex';
+    
+    document.getElementById('half-btn').onclick = () => {
+        addToCart(item.id, item.name, 'Half', item.price_half, item.category);
+        modal.style.display = 'none';
+    };
+    document.getElementById('full-btn').onclick = () => {
+        addToCart(item.id, item.name, 'Full', item.price_full, item.category);
+        modal.style.display = 'none';
+    };
+}
+
+function addToCart(id, name, portion, price, category) {
+    cart.push({ id, name, portion, price, category });
+    renderCart();
     validateFinalButton();
 }
 

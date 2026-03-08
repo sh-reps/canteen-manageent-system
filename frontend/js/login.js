@@ -1,4 +1,5 @@
 async function login() {
+    console.log("Login button clicked!");
     const admission_no = document.getElementById('admission_no').value;
     const password = document.getElementById('password').value;
     const errorMsg = document.getElementById('error-message');
@@ -17,19 +18,21 @@ async function login() {
             password: password 
         })
     });
-
+    localStorage.setItem('user_admission_no', admission_no);
     const data = await response.json();
 
+        // Inside login.js
         if (response.ok) {
-            // Save the user info locally so they stay logged in during their session
-            localStorage.setItem('user_role', data.role);
-            localStorage.setItem('admission_no', data.admission_no);
+            const data = await response.json();
+            localStorage.setItem("admission_no", data.admission_no); // Consistent key
+            window.location.href = "/booking";
+        
 
             // Redirect based on role
             if (data.role === 'admin') {
                 window.location.href = 'admin.html';
             } else {
-                window.location.href = 'booking.html';
+                window.location.href = "/booking";
             }
         } else {
             errorMsg.innerText = data.detail;

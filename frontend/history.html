@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Order History - Canteen</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body class="history-page">
+
+    <nav class="main-nav">
+        <a href="/booking">New Booking</a>
+        <a href="/history" class="active">Order History</a>
+    </nav>
+
+    <div class="container">
+        <div class="history-card">
+            <h2>Your Past Bookings</h2>
+            <p id="user-display"></p>
+            
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Time Slot</th>
+                        <th>Food Items</th>
+                        <th>Seat ID</th> <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="history-body">
+                    <tr>
+                        <td colspan="4" class="text-center">Loading your history...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/js/history.js"></script>
+</body>
+</html>
