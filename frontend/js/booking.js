@@ -71,8 +71,10 @@ function resetAndLock() {
 
 function calculateEndTime(startTime) {
     const [h, m] = startTime.split(':').map(Number);
-    let newM = m + 25;
-    return `${h}:${newM === 60 ? '00' : newM}`;
+    const newM = m + 25;
+    const newH = h + Math.floor(newM / 60);
+    const finalM = newM % 60;
+    return `${newH}:${finalM.toString().padStart(2, '0')}`;
 }
 
 
@@ -211,10 +213,13 @@ function renderMenu() {
             filteredItems.forEach(item => {
                 const card = document.createElement('div');
                 card.className = 'food-card';
+                const availableStock = (slot && item.prebook_pool > 0) ? item.prebook_pool : item.walkin_pool;
+                const stockStatus = availableStock > 0 ? `<span class="stock-badge available">✓ ${availableStock} Left</span>` : `<span class="stock-badge unavailable">Sold Out</span>`;
                 card.innerHTML = `
                     <h3>${item.name}</h3>
                     <p class="price">₹${item.price_full}</p>
-                    <button class="plan-btn" onclick="openCartModal()">Plan This Meal</button>
+                    ${stockStatus}
+                    <button class="plan-btn" onclick="openCartModal()" ${availableStock === 0 ? 'disabled' : ''}>Plan This Meal</button>
                 `;
                 mainPageContainer.appendChild(card);
             });
@@ -229,12 +234,15 @@ function renderMenu() {
             filteredItems.forEach(item => {
                 const row = document.createElement('div');
                 row.className = 'food-item-row';
+                const availableStock = item.prebook_pool > 0 ? item.prebook_pool : item.walkin_pool;
+                const stockInfo = availableStock > 0 ? `<span class="stock-info">${availableStock} available</span>` : `<span class="stock-info unavailable">Out of Stock</span>`;
                 row.innerHTML = `
                     <div class="item-details">
                         <span class="item-name">${item.name} (₹${item.price_full})</span>
                         <span class="item-meta">${item.category}</span>
+                        ${stockInfo}
                     </div>
-                    <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})'>+</button>
+                    <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})' ${availableStock === 0 ? 'disabled' : ''}>+</button>
                 `;
                 modalContainer.appendChild(row);
             });
@@ -243,6 +251,20 @@ function renderMenu() {
 }
 // Updated logic for Breakfast/Lunch and Category constraints
 function addItemToPlan(item) {
+    // Check stock availability
+    const availableStock = item.prebook_pool > 0 ? item.prebook_pool : item.walkin_pool;
+    if (availableStock <= 0) {
+        alert(`❌ ${item.name} is out of stock!`);
+        return;
+    }
+
+    // Check if already added (against available stock)
+    const itemCountInCart = cart.filter(i => i.id === item.id).length;
+    if (itemCountInCart >= availableStock) {
+        alert(`❌ Only ${availableStock} of ${item.name} available. You've already added ${itemCountInCart}.`);
+        return;
+    }
+
     const mealCount = cart.filter(i => i.category === 'meal').length;
     const curryCount = cart.filter(i => i.category === 'curry').length;
     const sideCount = cart.filter(i => i.category === 'side').length;

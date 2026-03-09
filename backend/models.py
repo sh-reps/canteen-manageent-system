@@ -18,12 +18,14 @@ class FoodItem(Base):
     name = Column(String)
     price_full = Column(Integer)
     price_half = Column(Integer, nullable=True)
-   
     category = Column(String) 
-    
     meal_type = Column(String) 
-    
     has_portions = Column(Boolean, default=True)
+    # Stock Logic Fields
+    admin_base_stock = Column(Integer, default=0) # Original input
+    prebook_pool = Column(Integer, default=0)    # 90% Breakfast / Dynamic Lunch
+    walkin_pool = Column(Integer, default=0)     # 10% Breakfast / 10% Lunch
+    is_walkin_only = Column(Boolean, default=False) # For Snacks
 
 class Booking(Base):
     __tablename__ = "bookings"

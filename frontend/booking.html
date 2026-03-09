@@ -9,6 +9,10 @@
 </head>
 <body>
 
+    <div class="system-clock-bar">
+        <div id="system-clock" class="system-clock"></div>
+    </div>
+
     <nav class="navbar">
         <div class="nav-left">
             <span class="logo">🍴 College Canteen</span>
@@ -20,6 +24,7 @@
     <nav>
         <a href="/booking">New Booking</a>
         <a href="/history">Order History</a>
+    </nav>
     </nav>
 
     <main class="container">
@@ -53,7 +58,7 @@
                 </select>
                 
                 <label>Time Slot</label>
-                <<select id="time-slot" onchange="checkSlotAvailability(); renderMenu();">
+                <select id="time-slot" onchange="checkSlotAvailability(); renderMenu();">
                     <option value="">Choose Time...</option>
                     <option value="12:00:00">12:00 PM</option>
                     <option value="12:15:00">12:15 PM</option>
@@ -142,6 +147,6 @@
         document.getElementById('display-admission').innerText = localStorage.getItem('admission_no') || 'Guest';
     </script>
 
-
+    <script src="/static/js/clock.js"></script>
 </body>
 </html>

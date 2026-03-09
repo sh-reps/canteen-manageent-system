@@ -8,9 +8,14 @@
 </head>
 <body class="history-page">
 
+    <div class="system-clock-bar">
+        <div id="system-clock" class="system-clock"></div>
+    </div>
+
     <nav class="main-nav">
         <a href="/booking">New Booking</a>
         <a href="/history" class="active">Order History</a>
+    </nav>
     </nav>
 
     <div class="container">
@@ -24,12 +29,14 @@
                         <th>Date</th>
                         <th>Time Slot</th>
                         <th>Food Items</th>
-                        <th>Seat ID</th> <th>Status</th>
+                        <th>Seat ID</th> 
+                        <th>Status</th>
+                        <th>Action</th>
                     </tr>
                 </thead>
                 <tbody id="history-body">
                     <tr>
-                        <td colspan="4" class="text-center">Loading your history...</td>
+                        <td colspan="6" class="text-center">Loading your history...</td>
                     </tr>
                 </tbody>
             </table>
@@ -37,5 +44,6 @@
     </div>
 
     <script src="/static/js/history.js"></script>
+    <script src="/static/js/clock.js"></script>
 </body>
 </html>

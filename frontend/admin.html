@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canteen Admin - Dashboard</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="admin-layout">
+
+    <div class="system-clock-bar">
+        <div id="system-clock" class="system-clock"></div>
+    </div>
+
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <h2>Canteen Admin</h2>
+        </div>
+        <ul>
+            <li id="nav-orders" onclick="showSection('orders')" class="nav-item active">
+                <i class="fas fa-receipt"></i> Orders
+            </li>
+            <li id="nav-users" onclick="showSection('users')" class="nav-item">
+                <i class="fas fa-users"></i> Users
+            </li>
+            <li id="nav-menu" onclick="showSection('menu')" class="nav-item">
+                <i class="fas fa-utensils"></i> Menu
+            </li>
+            <li id="nav-clock" onclick="showSection('clock')" class="nav-item">
+                <i class="fas fa-clock"></i> System Time
+            </li>
+        </ul>
+        <div class="sidebar-footer">
+            <button class="logout-btn" onclick="localStorage.clear(); location.href='/'">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </button>
+        </div>
+    </nav>
+
+    <main class="content">
+        
+        <section id="section-orders" class="admin-section">
+            <div class="section-header">
+                <h2>Live Order Management</h2>
+                <button class="btn-action" onclick="loadAllOrders()">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Slot</th>
+                        <th>User ID</th>
+                        <th>Items</th>
+                        <th>Seats/Type</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="admin-orders-body">
+                    </tbody>
+            </table>
+        </section>
+
+        <section id="section-users" class="admin-section" style="display:none;">
+            <div class="section-header">
+                <h2>Student Database</h2>
+                <button class="btn-confirm" onclick="openModal('user-modal')">
+                    <i class="fas fa-user-plus"></i> Add New User
+                </button>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Admission No</th>
+                        <th>Role</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="admin-users-body">
+                    </tbody>
+            </table>
+        </section>
+
+        <section id="section-menu" class="admin-section" style="display:none;">
+            <div class="section-header">
+                <h2>Canteen Menu</h2>
+                <button class="btn-confirm" onclick="openModal('menu-modal')">
+                    <i class="fas fa-plus"></i> Add Menu Item
+                </button>
+            </div>
+            <div id="admin-menu-list" class="menu-manage-grid">
+                </div>
+        </section>
+
+        <section id="section-clock" class="admin-section" style="display:none;">
+            <div class="section-header">
+                <h2>System Clock & Stock Logic</h2>
+            </div>
+            <div class="clock-container">
+                <div class="clock-card">
+                    <h3>Mock System Time</h3>
+                    <p>Current: <span id="mock-time-display" style="font-weight: bold; color: #ff6b6b;">Real Time</span></p>
+                    <div class="form-group">
+                        <input type="time" id="test-time" placeholder="Set time (HH:MM)">
+                        <button onclick="setMockTime()" class="btn-confirm">Set System Time</button>
+                    </div>
+                </div>
+                <div class="clock-card">
+                    <h3>Trigger Stock Logic</h3>
+                    <p>Execute time-based rollover rules:</p>
+                    <div class="trigger-buttons">
+                        <button onclick="triggerLogic('1am')" class="btn-action">🔴 Trigger 1 AM (Lunch Recalc)</button>
+                        <button onclick="triggerLogic('7am')" class="btn-action">🟡 Trigger 7 AM (Breakfast Roll)</button>
+                        <button onclick="triggerLogic('11am')" class="btn-action">🟢 Trigger 11 AM (Lunch Roll)</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="user-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content booking-card">
+            <h3>Add New User</h3>
+            <div class="form-group">
+                <input type="text" id="new-user-id" placeholder="Admission Number">
+                <input type="password" id="new-user-pass" placeholder="Password">
+                <select id="new-user-role">
+                    <option value="student">Student</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <div class="btn-group">
+                <button onclick="saveUser()" class="btn-confirm">Save User</button>
+                <button onclick="closeModal('user-modal')" class="btn-action">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="menu-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content booking-card">
+            <h3>New Menu Item</h3>
+            <div class="form-group">
+                <input type="text" id="food-name" placeholder="Item Name (e.g., Chicken Biriyani)">
+                <input type="number" id="food-price" placeholder="Price (Full)">
+                <select id="food-category">
+                    <option value="meal">Meal (Main)</option>
+                    <option value="curry">Curry</option>
+                    <option value="side">Side Dish</option>
+                </select>
+                <select id="food-meal-type">
+                    <option value="lunch">Lunch</option>
+                    <option value="breakfast">Breakfast</option>
+                </select>
+            </div>
+            <div class="btn-group">
+                <button onclick="saveFood()" class="btn-confirm">Add to Menu</button>
+                <button onclick="closeModal('menu-modal')" class="btn-action">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="edit-stock-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content booking-card">
+            <h3>Update Stock Levels</h3>
+            <input type="hidden" id="edit-food-id">
+            <div class="form-group">
+                <label>Admin Base Stock</label>
+                <input type="number" id="edit-base-stock">
+            </div>
+            <div class="btn-group">
+                <button onclick="saveStockEdit()" class="btn-confirm">Update Supabase</button>
+                <button onclick="closeModal('edit-stock-modal')" class="btn-action">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/admin.js"></script>
+    <script src="/static/js/clock.js"></script>
+</body>
+</html>
