@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Canteen - Plan Your Meal</title>
-    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="/css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
@@ -21,10 +21,9 @@
         <button class="logout-btn" onclick="logout()">Logout</button>
     </nav>
 
-    <nav>
-        <a href="/booking">New Booking</a>
+    <nav class="main-nav">
+        <a href="/booking" class="active">New Booking</a>
         <a href="/history">Order History</a>
-    </nav>
     </nav>
 
     <main class="container">
@@ -32,6 +31,8 @@
             <h1>Today's Menu</h1>
             <p class="subtitle">Select your items and click the cart to finalize your plan.</p>
         </header>
+
+        <!-- Booking date picker moved to cart modal pop-up -->
 
         <div id="menu-container" class="menu-grid" >
             </div>
@@ -96,9 +97,23 @@
                 </div>
             </div>
 
-            <button id="final-confirm" class="btn-confirm" disabled onclick="processBooking()">
+            <button id="final-confirm" class="btn-confirm" disabled onclick="onConfirmAndPay()">
                 Confirm & Pay
             </button>
+            <!-- Dummy Payment Modal -->
+            <div id="payment-modal" class="modal-overlay" style="display:none;">
+                <div class="modal-content booking-card">
+                    <div class="modal-header">
+                        <h2><i class="fas fa-credit-card"></i> Dummy Payment Gateway</h2>
+                        <span class="close-x" onclick="closePaymentModal()">&times;</span>
+                    </div>
+                    <div class="form-group">
+                        <p style="font-size:1.1em;">A pre-booking fee of <b>₹20</b> is required to confirm your pre-order.</p>
+                        <p style="color:#888;">(This is a dummy payment step for testing. No real money will be charged.)</p>
+                    </div>
+                    <button class="btn-confirm" onclick="completeDummyPayment()">Simulate Payment Success</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -130,23 +145,12 @@
         </div>
     </div>
 
-    <script src="/static/js/booking.js"></script>
+    <script src="/js/booking.js"></script>
+    <script src="/js/clock.js"></script>
+    <script src="/js/login.js"></script>
     <script>
-        // Simple UI helper to open/close the modal
-        function openCartModal() {
-            document.getElementById('cart-modal').style.display = 'flex';
-        }
-        function closeCartModal() {
-            document.getElementById('cart-modal').style.display = 'none';
-        }
-        function logout() {
-            localStorage.clear();
-            window.location.href = '/';
-        }
         // Show admission number on load
         document.getElementById('display-admission').innerText = localStorage.getItem('admission_no') || 'Guest';
     </script>
-
-    <script src="/static/js/clock.js"></script>
 </body>
 </html>

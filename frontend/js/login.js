@@ -1,3 +1,8 @@
+// Global logout function for all pages
+function logout() {
+    localStorage.clear();
+    window.location.href = '/';
+}
 // login.js - Ensure this is at the top level
 async function login() {
     const admission_no = document.getElementById('admission_no').value;
@@ -15,13 +20,13 @@ async function login() {
 
         if (response.ok) {
             localStorage.setItem('admission_no', data.admission_no);
-            localStorage.setItem('user_role', data.role);
+            localStorage.setItem('role', data.role);
 
             // Use absolute paths to prevent 404s
             if (data.role === 'admin') {
                 window.location.href = '/admin'; 
             } else {
-                window.location.href = "/booking";
+                window.location.href = '/booking';
             }
         } else {
             errorMsg.innerText = data.detail || "Invalid Credentials";

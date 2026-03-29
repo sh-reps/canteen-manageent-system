@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Canteen Admin - Dashboard</title>
-    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="./css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body class="admin-layout">
@@ -27,14 +27,21 @@
             <li id="nav-menu" onclick="showSection('menu')" class="nav-item">
                 <i class="fas fa-utensils"></i> Menu
             </li>
+            <li id="nav-stock" onclick="showSection('stock')" class="nav-item">
+                <i class="fas fa-boxes"></i> Daily Stock
+            </li>
             <li id="nav-clock" onclick="showSection('clock')" class="nav-item">
-                <i class="fas fa-clock"></i> System Time
+                <i class="fas fa-bug"></i> Debug
+            </li>
+            <li id="nav-holidays" onclick="showSection('holidays')" class="nav-item">
+                <i class="fas fa-calendar-times"></i> Holidays
             </li>
         </ul>
         <div class="sidebar-footer">
             <button class="logout-btn" onclick="localStorage.clear(); location.href='/'">
                 <i class="fas fa-sign-out-alt"></i> Logout
             </button>
+    <script src="./js/clock.js"></script>
         </div>
     </nav>
 
@@ -42,7 +49,8 @@
         
         <section id="section-orders" class="admin-section">
             <div class="section-header">
-                <h2>Live Order Management</h2>
+                <h2>Order Management (Day-wise)</h2>
+                <input type="date" id="admin-orders-date" style="margin-right:10px;">
                 <button class="btn-action" onclick="loadAllOrders()">
                     <i class="fas fa-sync"></i> Refresh
                 </button>
@@ -84,8 +92,11 @@
 
         <section id="section-menu" class="admin-section" style="display:none;">
             <div class="section-header">
-                <h2>Canteen Menu</h2>
-                <button class="btn-confirm" onclick="openModal('menu-modal')">
+                <h2>Menu Catalog (Add/Edit Food)</h2>
+                <button class="btn-confirm" onclick="loadFoodCatalog()">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+                <button class="btn-confirm" onclick="openFoodModal()">
                     <i class="fas fa-plus"></i> Add Menu Item
                 </button>
             </div>
@@ -93,17 +104,42 @@
                 </div>
         </section>
 
+        <section id="section-stock" class="admin-section" style="display:none;">
+            <div class="section-header">
+                <h2>Daily Stock Allocation</h2>
+                <select id="admin-stock-day" style="margin-right:10px;" onchange="loadDailyStock()">
+                    <option value="monday">Monday</option>
+                    <option value="tuesday">Tuesday</option>
+                    <option value="wednesday">Wednesday</option>
+                    <option value="thursday">Thursday</option>
+                    <option value="friday">Friday</option>
+                    <option value="saturday">Saturday</option>
+                </select>
+                <button class="btn-confirm" onclick="loadDailyStock()">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+            </div>
+            <div id="admin-stock-list" class="menu-manage-grid">
+                </div>
+        </section>
+
         <section id="section-clock" class="admin-section" style="display:none;">
             <div class="section-header">
-                <h2>System Clock & Stock Logic</h2>
+                <h2>System Debug & Logic Tests</h2>
             </div>
             <div class="clock-container">
                 <div class="clock-card">
                     <h3>Mock System Time</h3>
-                    <p>Current: <span id="mock-time-display" style="font-weight: bold; color: #ff6b6b;">Real Time</span></p>
+                    <p>Current Time: <span id="mock-time-display" style="font-weight: bold; color: #ff6b6b;">Real Time</span></p>
                     <div class="form-group">
                         <input type="time" id="test-time" placeholder="Set time (HH:MM)">
                         <button onclick="setMockTime()" class="btn-confirm">Set System Time</button>
+                    </div>
+                    <hr>
+                    <p>Current Date: <span id="mock-date-display" style="font-weight: bold; color: #4e8cff;">Real Date</span></p>
+                    <div class="form-group">
+                        <input type="date" id="test-date">
+                        <button onclick="setMockDate()" class="btn-confirm">Set System Date</button>
                     </div>
                 </div>
                 <div class="clock-card">
@@ -111,9 +147,43 @@
                     <p>Execute time-based rollover rules:</p>
                     <div class="trigger-buttons">
                         <button onclick="triggerLogic('1am')" class="btn-action">🔴 Trigger 1 AM (Lunch Recalc)</button>
+                        <button onclick="triggerLogic('5pm')" class="btn-action">🟠 Trigger 5 PM (Next Day Breakfast)</button>
                         <button onclick="triggerLogic('7am')" class="btn-action">🟡 Trigger 7 AM (Breakfast Roll)</button>
                         <button onclick="triggerLogic('11am')" class="btn-action">🟢 Trigger 11 AM (Lunch Roll)</button>
                     </div>
+                </div>
+                <div class="clock-card">
+                    <h3>Seed Fake Orders</h3>
+                    <p>Generate up to 50 random pre-book orders for testing.</p>
+                    <div class="form-group">
+                        <input type="date" id="seed-date">
+                    </div>
+                    <div class="form-group">
+                        <select id="seed-meal-type">
+                            <option value="breakfast">Breakfast (Sit-in)</option>
+                            <option value="lunch">Lunch (Parcel)</option>
+                        </select>
+                    </div>
+                    <button onclick="seedFakeOrders()" class="btn-confirm">Generate Orders</button>
+                </div>
+            </div>
+        </section>
+
+        <section id="section-holidays" class="admin-section" style="display:none;">
+            <div class="section-header">
+                <h2>Holiday Management</h2>
+            </div>
+            <div class="holiday-container">
+                <div class="booking-card">
+                    <h3>Add a Holiday</h3>
+                    <div class="form-group">
+                        <input type="date" id="holiday-date">
+                        <button onclick="addHoliday()" class="btn-confirm">Add Holiday</button>
+                    </div>
+                </div>
+                <div class="booking-card">
+                    <h3>Official Holidays</h3>
+                    <ul id="holiday-list" class="holiday-list-class"></ul>
                 </div>
             </div>
         </section>
@@ -123,10 +193,12 @@
         <div class="modal-content booking-card">
             <h3>Add New User</h3>
             <div class="form-group">
-                <input type="text" id="new-user-id" placeholder="Admission Number">
+                <input type="text" id="new-user-id" placeholder="Admission No / Staff ID">
                 <input type="password" id="new-user-pass" placeholder="Password">
+                <input type="email" id="new-user-email" placeholder="Email (Optional)">
                 <select id="new-user-role">
                     <option value="student">Student</option>
+                    <option value="staff">Staff</option>
                     <option value="admin">Admin</option>
                 </select>
             </div>
@@ -152,6 +224,12 @@
                     <option value="lunch">Lunch</option>
                     <option value="breakfast">Breakfast</option>
                 </select>
+                <div class="form-group" id="food-portions-container" style="margin-top:15px;">
+                    <label><input type="checkbox" id="food-has-portions"> Has Portions (Half/Full)</label>
+                </div>
+                <div class="form-group" id="food-countable-container">
+                    <label style="display: flex; align-items: center;"><input type="checkbox" id="food-is-countable" style="width: auto; margin-right: 10px;"> Is Countable (e.g. Appam)</label>
+                </div>
             </div>
             <div class="btn-group">
                 <button onclick="saveFood()" class="btn-confirm">Add to Menu</button>
@@ -168,14 +246,22 @@
                 <label>Admin Base Stock</label>
                 <input type="number" id="edit-base-stock">
             </div>
+            <div class="form-group">
+                <label>Pre-book Pool</label>
+                <input type="number" id="edit-prebook-pool">
+            </div>
+            <div class="form-group">
+                <label>Walk-in Pool</label>
+                <input type="number" id="edit-walkin-pool">
+            </div>
             <div class="btn-group">
-                <button onclick="saveStockEdit()" class="btn-confirm">Update Supabase</button>
+                <button onclick="saveStockEdit()" class="btn-confirm">Update Stock</button>
                 <button onclick="closeModal('edit-stock-modal')" class="btn-action">Cancel</button>
             </div>
         </div>
     </div>
 
-    <script src="/static/js/admin.js"></script>
-    <script src="/static/js/clock.js"></script>
+    <script src="/js/admin.js"></script>
+    <script src="/js/clock.js"></script>
 </body>
 </html>

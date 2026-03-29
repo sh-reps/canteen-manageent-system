@@ -1,23 +1,406 @@
+let logicStatus = {lunch_1am: false, breakfast_7am: false, breakfast_5pm: false};
+// Global logout function for navbar button
+function logout() {
+    localStorage.clear();
+    window.location.href = '/';
+}
 // ==========================================
 // 1. GLOBAL STATE & CONFIGURATION
 // ==========================================
-let cart = [];
+let cart = []; // Now an array of { item: {...}, quantity: #, portion: '...', price: # }
 let selectedSeatIds = [];
 let menuItems = []; // To store items fetched from backend
 let allowedFoodCount = 0;
+let selectedDate = null; // To store the selected booking date
+let currentViewMode = 'pre-order';
+let currentMealType = 'breakfast';
 const SIT_IN_SLOTS = ["12:00:00", "12:25:00", "12:50:00", "13:15:00"]; // Match backend format
 
 // ==========================================
 // 2. INITIALIZATION (On Page Load)
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
-    fetchMenu();
-    resetAndLock();
-   
-    // Ensure modal is hidden initially
-    const modal = document.getElementById('seat-modal');
-    if (modal) modal.style.display = 'none';
+
+    fetchLogicStatus().then(() => {
+        fetchMenu();
+        initializeNav();
+    });
 });
+
+async function fetchLogicStatus() {
+    try {
+        const res = await fetch('http://127.0.0.1:8000/stock-logic-status');
+        if (res.ok) {
+            logicStatus = await res.json();
+        }
+    } catch (e) { logicStatus = {lunch_1am: false, breakfast_7am: false}; }
+}
+
+function initializeNav() {
+    const container = document.querySelector('.container') || document.body;
+    if (!container) return;
+
+    // Create Nav Panels for Pre-order / Walk-in (The top-level toggle)
+    const navDiv = document.createElement('div');
+    navDiv.className = 'nav-panels';
+    navDiv.innerHTML = `
+        <button class="toggle-btn view-mode-btn active" data-mode="pre-order" onclick="setViewMode('pre-order')">🍱 Pre-order Menu</button>
+        <button class="toggle-btn view-mode-btn" data-mode="walk-in" onclick="setViewMode('walk-in')">🚶 Walk-in Menu</button>
+    `;
+
+    // Find the menu container to insert the nav before it
+    const menuContainer = document.getElementById('menu-container');
+    if (menuContainer) {
+        menuContainer.parentNode.insertBefore(navDiv, menuContainer);
+    } else {
+        container.prepend(navDiv);
+    }
+
+    // Create Meal Type Toggles
+    const mealDiv = document.createElement('div');
+    mealDiv.className = 'meal-type-toggles';
+    mealDiv.innerHTML = `
+        <button class="toggle-btn meal-toggle-btn active" data-type="breakfast" onclick="setMealType('breakfast')">Breakfast</button>
+        <button class="toggle-btn meal-toggle-btn" data-type="lunch" onclick="setMealType('lunch')">Lunch</button>
+        <button class="toggle-btn meal-toggle-btn" data-type="snack" id="snack-toggle" style="display:none" onclick="setMealType('snack')">Snacks</button>
+    `;
+    navDiv.after(mealDiv);
+}
+
+function setViewMode(mode) {
+    currentViewMode = mode;
+    if (mode === 'pre-order' && currentMealType === 'snack') {
+        currentMealType = 'breakfast';
+    }
+    const snackToggle = document.getElementById('snack-toggle');
+    if (snackToggle) snackToggle.style.display = (mode === 'walk-in') ? 'inline-block' : 'none';
+    
+    document.querySelectorAll('.view-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    updateMealToggleUI();
+    renderMenu();
+}
+
+function setMealType(type) {
+    currentMealType = type;
+    updateMealToggleUI();
+    renderMenu();
+}
+
+function updateMealToggleUI() {
+    document.querySelectorAll('.meal-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.type === currentMealType));
+}
+
+function openCartModal() {
+    const modal = document.getElementById('cart-modal');
+    if (!modal) return;
+
+// Expose openCartModal globally for inline HTML onclick
+window.openCartModal = openCartModal;
+window.closeCartModal = closeCartModal;
+
+    // Also attach event listeners to close buttons in case HTML onclick is missing
+    const closeBtns = modal.querySelectorAll('.close-x, .close-btn');
+    closeBtns.forEach(btn => {
+        btn.removeEventListener('click', closeCartModal); // prevent duplicates
+        btn.addEventListener('click', closeCartModal);
+    });
+
+    // --- NUCLEAR OPTION: Inject Styles directly to bypass browser caching ---
+    if (!document.getElementById('dynamic-date-styles')) {
+        const style = document.createElement('style');
+        style.id = 'dynamic-date-styles';
+        style.innerHTML = `
+            .date-radio-label { flex: 0 0 70px; display: flex; flex-direction: column; align-items: center; padding: 10px 5px; background: #f8f9fa; border-radius: 10px; cursor: pointer; border: 2px solid #ddd; transition: all 0.2s; margin-right: 5px; }
+            .date-radio-label span { font-size: 0.75rem; color: #666; text-transform: uppercase; margin-bottom: 2px; }
+            .date-radio-label strong { font-size: 1.1rem; color: #222; }
+            .date-radio-label input { display: none; }
+            .date-radio-label.selected-tile { background: rgba(46, 204, 113, 0.15) !important; border-color: #2ecc71 !important; }
+            .date-radio-label.disabled { opacity: 0.4; cursor: not-allowed; border-color: transparent; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // 2. Ensure we have a fresh container for Step 1 inside the modal
+    let dateSection = document.getElementById('modal-date-section');
+
+    if (!dateSection) {
+        dateSection = document.createElement('div');
+        dateSection.id = 'modal-date-section';
+        // Hardcode CSS inline to guarantee visibility no matter what CSS file is cached
+        dateSection.style.cssText = "background: #1a1a1a; padding: 15px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #444; display: block !important;";
+        
+        dateSection.innerHTML = `
+            <h4 style="margin: 0 0 15px 0; color: #fff; font-size: 0.85rem; text-transform: uppercase; border-bottom: 1px solid #444; padding-bottom: 8px;">
+                <span style="background: #2ecc71; color: white; padding: 2px 8px; border-radius: 4px; margin-right: 10px;">Step 1</span> 
+                Select Booking Date
+            </h4>
+            <div id="date-tiles-wrapper" style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 5px;"></div>
+        `;
+
+        // Bulletproof placement: Force insertion right above "Dining Mode"
+        const orderTypeSelect = document.getElementById('order-type');
+        if (orderTypeSelect) {
+            const formGroup = orderTypeSelect.closest('.form-group');
+            if (formGroup && formGroup.parentNode) {
+                formGroup.parentNode.insertBefore(dateSection, formGroup);
+            } else {
+                orderTypeSelect.parentNode.insertBefore(dateSection, orderTypeSelect);
+            }
+        } else {
+            // Fallback to the first child of the modal
+            const modalContent = modal.querySelector('.booking-card') || modal;
+            modalContent.insertBefore(dateSection, modalContent.children[1] || modalContent.firstChild);
+        }
+    }
+
+    modal.style.display = 'flex';
+    initializeDatePicker();
+    renderMenu();
+}
+
+function closeCartModal() {
+    const modal = document.getElementById('cart-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function initializeDatePicker() {
+    const tilesWrapper = document.getElementById('date-tiles-wrapper');
+    if (!tilesWrapper) return;
+
+    // Skip if already populated
+    if (tilesWrapper.children.length > 0 && !tilesWrapper.innerHTML.includes("Loading")) return;
+    
+    tilesWrapper.innerHTML = "<span style='color:#888; font-size:0.9rem;'>Loading dates...</span>";
+
+    let holidayDates = [];
+    try {
+        // Force a 2.5 second timeout so a bad server connection doesn't freeze the UI forever
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
+        const response = await fetch('http://127.0.0.1:8000/api/holidays', { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+            const holidays = await response.json();
+            holidayDates = holidays.map(h => h.date);
+        }
+    } catch (err) {
+        console.warn("Holiday fetch failed, proceeding with standard weekends.");
+    }
+    tilesWrapper.innerHTML = ""; // Clear loader
+
+
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const dayOfWeek = today.getDay(); // 0=Sun, 6=Sat
+    let startDate, endDate;
+    if (dayOfWeek === 6) {
+        // If today is Saturday, show only next week (Sunday to Saturday)
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() + 1 - dayOfWeek + 7); // Next week's Sunday
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6); // Next week's Saturday
+    } else {
+        // If today is Sunday through Friday, show only this week (today through Saturday)
+        startDate = new Date(today);
+        endDate = new Date(today);
+        endDate.setDate(today.getDate() + (6 - dayOfWeek));
+    }
+
+    let firstAvailableDate = null;
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        const date = new Date(d);
+        // Local timezone safe date formatting
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const dateString = `${year}-${month}-${day}`;
+
+        const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+        const isHoliday = holidayDates.includes(dateString);
+
+        const loopDateZero = new Date(date);
+        loopDateZero.setHours(0,0,0,0);
+        const isPast = loopDateZero < today;
+        const isDisabled = isWeekend || isHoliday || isPast;
+
+        const radioId = `date-${dateString}`;
+        const label = document.createElement('label');
+        label.className = 'date-radio-label';
+        if (isDisabled) {
+            label.classList.add('disabled');
+        }
+
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'booking_date';
+        radio.id = radioId;
+        radio.value = dateString;
+        radio.disabled = isDisabled;
+        radio.addEventListener('change', onDateChange);
+
+        label.appendChild(radio);
+        label.insertAdjacentHTML('beforeend', `<span>${date.toDateString().slice(0, 3)}</span><strong>${date.getDate()}</strong>`);
+        tilesWrapper.appendChild(label);
+
+        if (!isDisabled && !firstAvailableDate) {
+            firstAvailableDate = dateString;
+        }
+    }
+
+    if (firstAvailableDate) {
+        // Only query inside the newly generated tiles to avoid invisible phantom inputs
+        const firstRadio = tilesWrapper.querySelector(`input[value="${firstAvailableDate}"]`);
+        if (firstRadio) {
+            firstRadio.checked = true;
+            firstRadio.closest('.date-radio-label').classList.add('selected-tile');
+            selectedDate = firstAvailableDate;
+        }
+    }
+
+    // Initial data load
+    onDateChange();
+    // Add meal type picker after date selection
+    addMealTypePicker();
+}
+
+function addMealTypePicker() {
+    let mealTypeSection = document.getElementById('modal-mealtype-section');
+    if (!mealTypeSection) {
+        mealTypeSection = document.createElement('div');
+        mealTypeSection.id = 'modal-mealtype-section';
+        mealTypeSection.style.cssText = "background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #eee; display: block !important;";
+        mealTypeSection.innerHTML = `
+            <h4 style=\"margin: 0 0 15px 0; color: #333; font-size: 0.85rem; text-transform: uppercase; border-bottom: 1px solid #eee; padding-bottom: 8px;\">
+                <span style=\"background: #2ecc71; color: white; padding: 2px 8px; border-radius: 4px; margin-right: 10px;\">Step 2</span> 
+                Select Meal Type
+            </h4>
+            <div id=\"meal-type-radio-group\" style=\"display: flex; gap: 16px;\">
+                <label style=\"color:#333; font-weight: 500; cursor: pointer;\"><input type=\"radio\" name=\"modal-mealtype\" value=\"breakfast\" checked> Breakfast</label>
+                <label style=\"color:#333; font-weight: 500; cursor: pointer;\"><input type=\"radio\" name=\"modal-mealtype\" value=\"lunch\"> Lunch</label>
+            </div>
+        `;
+        // Insert after date section
+        const dateSection = document.getElementById('modal-date-section');
+        if (dateSection && dateSection.parentNode) {
+            dateSection.parentNode.insertBefore(mealTypeSection, dateSection.nextSibling);
+        }
+    }
+    // Add event listeners
+    const radios = mealTypeSection.querySelectorAll('input[name="modal-mealtype"]');
+    radios.forEach(radio => {
+        radio.addEventListener('change', onMealTypeChange);
+    });
+    // Set initial state
+    onMealTypeChange();
+    // Ensure updateLimits is called on order type and parcel count changes
+    const orderType = document.getElementById('order-type');
+    if (orderType) orderType.addEventListener('change', updateLimits);
+    const parcelCount = document.getElementById('parcel-count');
+    if (parcelCount) {
+        parcelCount.value = parcelCount.value || 1;
+        parcelCount.addEventListener('change', updateLimits);
+    }
+}
+
+function onMealTypeChange() {
+    const mealType = document.querySelector('input[name="modal-mealtype"]:checked').value;
+    currentMealType = mealType;
+    // Update order type options
+    const orderType = document.getElementById('order-type');
+    const sitInConfig = document.getElementById('sit-in-config');
+    const parcelConfig = document.getElementById('parcel-config');
+    const capacitySection = document.getElementById('capacity-section');
+    if (orderType) {
+        if (mealType === 'breakfast') {
+            // Only sit-in allowed
+            orderType.value = 'sit-in';
+            orderType.querySelector('option[value="parcel"]').style.display = 'none';
+            orderType.querySelector('option[value="sit-in"]').style.display = '';
+            orderType.disabled = true;
+            // Always show sit-in config for breakfast
+            if (sitInConfig) sitInConfig.style.display = 'block';
+            if (parcelConfig) parcelConfig.style.display = 'none';
+            if (capacitySection) capacitySection.style.display = 'block';
+        } else {
+            // Both allowed
+            orderType.disabled = false;
+            orderType.querySelector('option[value="parcel"]').style.display = '';
+            orderType.querySelector('option[value="sit-in"]').style.display = '';
+            // Show/hide based on order type
+            if (sitInConfig) sitInConfig.style.display = (orderType.value === 'sit-in') ? 'block' : 'none';
+            if (parcelConfig) parcelConfig.style.display = (orderType.value === 'parcel') ? 'block' : 'none';
+            if (capacitySection) capacitySection.style.display = orderType.value ? 'block' : 'none';
+        }
+    }
+    // Update time slot options
+    updateTimeSlotsForMealType(mealType);
+}
+
+function updateTimeSlotsForMealType(mealType) {
+    const timeSlotPicker = document.getElementById('time-slot');
+    if (!timeSlotPicker) return;
+    timeSlotPicker.innerHTML = '<option value="">Choose Time...</option>';
+    if (mealType === 'breakfast') {
+        // 8:00, 8:30, 9:00
+        const breakfastSlots = ["08:00", "08:30", "09:00"];
+        breakfastSlots.forEach(time => {
+            let opt = document.createElement('option');
+            opt.value = time;
+            opt.text = `${time} - ${calculateEndTimeBreakfast(time)}`;
+            timeSlotPicker.appendChild(opt);
+        });
+    } else {
+        // Lunch slots as before
+        const sitInSlots = ["12:00", "12:25", "12:50", "13:15"];
+        const parcelSlots = ["12:00", "12:15", "12:30", "12:45", "13:00", "13:15", "13:30"];
+        const orderType = document.getElementById('order-type');
+        if (orderType && orderType.value === 'sit-in') {
+            sitInSlots.forEach(time => {
+                let opt = document.createElement('option');
+                opt.value = time;
+                opt.text = `${time} - ${calculateEndTime(time)}`;
+                timeSlotPicker.appendChild(opt);
+            });
+        } else {
+            parcelSlots.forEach(time => {
+                let opt = document.createElement('option');
+                opt.value = time;
+                opt.text = time;
+                timeSlotPicker.appendChild(opt);
+            });
+        }
+    }
+}
+
+function calculateEndTimeBreakfast(startTime) {
+    const [h, m] = startTime.split(':').map(Number);
+    const newM = m + 30;
+    const newH = h + Math.floor(newM / 60);
+    const finalM = newM % 60;
+    return `${newH}:${finalM.toString().padStart(2, '0')}`;
+}
+
+function onDateChange() {
+    const wrapper = document.getElementById('date-tiles-wrapper');
+    if (!wrapper) return;
+    
+    // Wipe highlight from all tiles
+    wrapper.querySelectorAll('.date-radio-label').forEach(lbl => {
+        lbl.classList.remove('selected-tile');
+    });
+
+    const selectedRadio = wrapper.querySelector('input[name="booking_date"]:checked');
+    if (selectedRadio) {
+        // Apply robust highlight class
+        selectedRadio.closest('.date-radio-label').classList.add('selected-tile');
+        selectedDate = selectedRadio.value;
+        console.log("Selected date:", selectedDate);
+        resetAndLock();
+        fetchMenu();
+    }
+}
+
 
 // ==========================================
 // 3. CORE BOOKING FLOW LOGIC
@@ -27,44 +410,54 @@ document.addEventListener('DOMContentLoaded', () => {
 // Update this function in your booking.js
 
 function resetAndLock() {
-    const type = document.getElementById('order-type').value;
+    const typeEl = document.getElementById('order-type');
+    if (!typeEl) return; // Crash prevention!
+    const type = typeEl.value;
+    
     const timeSlotPicker = document.getElementById('time-slot');
     const capacitySection = document.getElementById('capacity-section');
     const sitInConfig = document.getElementById('sit-in-config');
+    const parcelConfig = document.getElementById('parcel-config');
 
     // Reset state
     cart = [];
     selectedSeatIds = [];
     allowedFoodCount = 0;
 
-    // Clear and refill the Time Slot dropdown
-    timeSlotPicker.innerHTML = '<option value="">Choose Time...</option>';
-
-    if (type === 'sit-in') {
-        const sitInSlots = ["12:00", "12:25", "12:50", "13:15"];
-        sitInSlots.forEach(time => {
-            let opt = document.createElement('option');
-            opt.value = time;
-            opt.text = `${time} - ${calculateEndTime(time)}`;
-            timeSlotPicker.appendChild(opt);
-        });
-        sitInConfig.style.display = 'block';
-        document.getElementById('sit-in-config').style.display = 'block';
-        document.getElementById('parcel-config').style.display = 'none';
-    } else if (type === 'parcel') {
-        // Keep your 15-min intervals for parcels if you like
-        const parcelSlots = ["12:00", "12:15", "12:30", "12:45", "13:00", "13:15", "13:30"];
-        parcelSlots.forEach(time => {
-            let opt = document.createElement('option');
-            opt.value = time;
-            opt.text = time;
-            timeSlotPicker.appendChild(opt);
-        });
-        document.getElementById('sit-in-config').style.display = 'none';
-        document.getElementById('parcel-config').style.display = 'block';
+    if (timeSlotPicker) {
+        timeSlotPicker.innerHTML = '<option value="">Choose Time...</option>';
+        if (currentMealType === 'breakfast') {
+            // Always show breakfast slots for breakfast
+            const breakfastSlots = ["08:00", "08:30", "09:00"];
+            breakfastSlots.forEach(time => {
+                let opt = document.createElement('option');
+                opt.value = time;
+                opt.text = `${time} - ${calculateEndTimeBreakfast(time)}`;
+                timeSlotPicker.appendChild(opt);
+            });
+        } else if (type === 'sit-in') {
+            const sitInSlots = ["12:00", "12:25", "12:50", "13:15"];
+            sitInSlots.forEach(time => {
+                let opt = document.createElement('option');
+                opt.value = time;
+                opt.text = `${time} - ${calculateEndTime(time)}`;
+                timeSlotPicker.appendChild(opt);
+            });
+        } else if (type === 'parcel') {
+            const parcelSlots = ["12:00", "12:15", "12:30", "12:45", "13:00", "13:15", "13:30"];
+            parcelSlots.forEach(time => {
+                let opt = document.createElement('option');
+                opt.value = time;
+                opt.text = time;
+                timeSlotPicker.appendChild(opt);
+            });
+        }
     }
 
-    capacitySection.style.display = type ? 'block' : 'none';
+    if (sitInConfig) sitInConfig.style.display = (type === 'sit-in') ? 'block' : 'none';
+    if (parcelConfig) parcelConfig.style.display = (type === 'parcel') ? 'block' : 'none';
+    if (capacitySection) capacitySection.style.display = type ? 'block' : 'none';
+
     updateLimits(); 
     renderCart();
 }
@@ -80,26 +473,32 @@ function calculateEndTime(startTime) {
 
 // Update the allowed items based on Seats or Parcel Count
 function updateLimits() {
-    const type = document.getElementById('order-type').value;
+    const typeEl = document.getElementById('order-type');
+    if (!typeEl) return;
+    const type = typeEl.value;
     const foodArea = document.getElementById('food-selection-area');
     
     if (type === 'sit-in') {
         allowedFoodCount = selectedSeatIds.length;
-        document.getElementById('seat-status').innerText = `Seats selected: ${allowedFoodCount}`;
+        const seatStatus = document.getElementById('seat-status');
+        if(seatStatus) seatStatus.innerText = `Seats selected: ${allowedFoodCount}`;
     } else if (type === 'parcel') {
-        allowedFoodCount = parseInt(document.getElementById('parcel-count').value) || 0;
+        const pCount = document.getElementById('parcel-count');
+        allowedFoodCount = pCount ? (parseInt(pCount.value) || 0) : 0;
     }
 
-    document.getElementById('max-items').innerText = allowedFoodCount;
+    const maxItems = document.getElementById('max-items');
+    if (maxItems) maxItems.innerText = allowedFoodCount;
 
-    // Only unlock food if they've set a capacity > 0
-    if (allowedFoodCount > 0) {
-        foodArea.style.opacity = "1";
-        foodArea.style.pointerEvents = "auto";
-    } else {
-        foodArea.style.opacity = "0.5";
-        foodArea.style.pointerEvents = "none";
-        cart = []; // Clear food if they reduce capacity below cart size
+    if (foodArea) {
+        if (allowedFoodCount > 0) {
+            foodArea.style.opacity = "1";
+            foodArea.style.pointerEvents = "auto";
+        } else {
+            foodArea.style.opacity = "0.5";
+            foodArea.style.pointerEvents = "none";
+            cart = []; 
+        }
     }
     
     validateFinalButton();
@@ -125,21 +524,36 @@ async function refreshSeatList() {
     const grid = document.getElementById('seat-grid');
     const slot = document.getElementById('time-slot').value;
     
-    if (!slot) {
-        grid.innerHTML = "<p>Please select a time slot first.</p>";
+    if (!slot || !selectedDate) {
+        grid.innerHTML = "<p>Please select a date and time slot first.</p>";
         return;
+    }
+
+    // NEW: Determine which seating section to show based on the user's role.
+    // We'll assume 'admin' users book in the 'staff' section.
+    const userRole = localStorage.getItem('role') || 'student'; // Default to 'student' if role is not found
+    const section = (userRole === 'staff' || userRole === 'admin') ? 'staff' : 'student';
+
+    // NEW: Update the modal title to inform the user which section they are seeing.
+    const seatPicker = document.getElementById('seat-modal');
+    if (seatPicker) {
+        const title = seatPicker.querySelector('.modal-header h2'); // Assumes an <h2> exists in your modal header
+        if (title) {
+            title.textContent = `Select Seat (${section.charAt(0).toUpperCase() + section.slice(1)} Section)`;
+        }
     }
 
     grid.innerHTML = "Loading...";
     try {
-        const response = await fetch(`http://127.0.0.1:8000/available-seats/${slot}`);
+        const response = await fetch(`http://127.0.0.1:8000/available-seats/${section}/${slot}/${selectedDate}`);
         const seats = await response.json();
 
         grid.innerHTML = ""; 
         seats.forEach(seat => {
             const box = document.createElement('div');
             box.className = 'seat-box';
-            box.innerText = `${seat.table_number}-${seat.seat_number}`;
+            const prefix = seat.section === 'staff' ? 'S' : '';
+            box.innerText = `${prefix}${seat.table_number}-${seat.seat_number}`;
 
             if (selectedSeatIds.includes(seat.id)) box.classList.add('selected');
 
@@ -172,11 +586,21 @@ async function refreshSeatList() {
 // ==========================================
 async function fetchMenu() {
     try {
-        const response = await fetch('http://127.0.0.1:8000/food-items');
+        // Determine the selected booking day (e.g., 'monday')
+        let dayParam = '';
+        if (typeof selectedDate === 'string' && selectedDate) {
+            const dateObj = new Date(selectedDate);
+            // Get weekday name in lowercase (e.g., 'monday')
+            dayParam = dateObj.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+        }
+        let url = 'http://127.0.0.1:8000/food-items';
+        if (dayParam) {
+            url += `?day=${dayParam}`;
+        }
+        const response = await fetch(url);
         const data = await response.json();
-        
+        console.log('Fetched menu data:', data);
         menuItems = Array.isArray(data) ? data : [data];
-        
         // This is the key: call renderMenu() only after menuItems is populated
         renderMenu(); 
     } catch (err) {
@@ -187,39 +611,51 @@ async function fetchMenu() {
 function renderMenu() {
     const modalContainer = document.getElementById('cart-items-container');
     const mainPageContainer = document.getElementById('menu-container');
-    const slot = document.getElementById('time-slot').value;
+    const slotInput = document.getElementById('time-slot');
+    const slot = slotInput ? slotInput.value : "";
 
-    // Clear previous views
+    console.log('Rendering menuItems:', menuItems);
+    const filteredItems = menuItems.filter(item => {
+        if (currentMealType === 'snack') return item.category === 'snack';
+        return item.meal_type === currentMealType;
+    });
+    console.log('Filtered menuItems:', filteredItems);
+
     if (modalContainer) modalContainer.innerHTML = "";
     if (mainPageContainer) mainPageContainer.innerHTML = "";
-
-    // Determine Meal Type based on current real-world time if no slot is selected
-    let currentMealType;
-    if (slot) {
-        const hour = parseInt(slot.split(':')[0]);
-        currentMealType = (hour >= 11) ? 'lunch' : 'breakfast';
-    } else {
-        const now = new Date();
-        currentMealType = (now.getHours() >= 11) ? 'lunch' : 'breakfast';
-    }
-
-    const filteredItems = menuItems.filter(item => item.meal_type === currentMealType);
 
     // 1. RENDER MAIN PAGE (Works even without a slot selected)
     if (mainPageContainer) {
         if (filteredItems.length === 0) {
             mainPageContainer.innerHTML = `<p>No ${currentMealType} items available right now.</p>`;
         } else {
+            let isFutureDay = false;
+            if (selectedDate) {
+                const today = new Date();
+                const selDate = new Date(selectedDate);
+                today.setHours(0,0,0,0);
+                selDate.setHours(0,0,0,0);
+                isFutureDay = selDate > today;
+            }
             filteredItems.forEach(item => {
                 const card = document.createElement('div');
                 card.className = 'food-card';
-                const availableStock = (slot && item.prebook_pool > 0) ? item.prebook_pool : item.walkin_pool;
-                const stockStatus = availableStock > 0 ? `<span class="stock-badge available">✓ ${availableStock} Left</span>` : `<span class="stock-badge unavailable">Sold Out</span>`;
+                let planBtn = '';
+                let infoMsg = '';
+
+                if (currentViewMode === 'walk-in' || currentMealType === 'snack') {
+                    planBtn = '';
+                    infoMsg = '<div class="info-msg">Walk-in only. Purchase at counter.</div>';
+                } else {
+                    planBtn = `<button class="plan-btn" onclick="openCartModal()">Order Now</button>`;
+                    infoMsg = '';
+                }
+
                 card.innerHTML = `
                     <h3>${item.name}</h3>
                     <p class="price">₹${item.price_full}</p>
-                    ${stockStatus}
-                    <button class="plan-btn" onclick="openCartModal()" ${availableStock === 0 ? 'disabled' : ''}>Plan This Meal</button>
+                    ${planBtn}
+                    ${infoMsg}
                 `;
                 mainPageContainer.appendChild(card);
             });
@@ -228,49 +664,123 @@ function renderMenu() {
 
     // 2. RENDER PLANNING MODAL (Strictly requires a slot)
     if (modalContainer) {
-        if (!slot) {
-            modalContainer.innerHTML = "<p class='status-msg'>Please select a time slot first to add items.</p>";
-        } else {
-            filteredItems.forEach(item => {
-                const row = document.createElement('div');
-                row.className = 'food-item-row';
-                const availableStock = item.prebook_pool > 0 ? item.prebook_pool : item.walkin_pool;
-                const stockInfo = availableStock > 0 ? `<span class="stock-info">${availableStock} available</span>` : `<span class="stock-info unavailable">Out of Stock</span>`;
-                row.innerHTML = `
-                    <div class="item-details">
-                        <span class="item-name">${item.name} (₹${item.price_full})</span>
-                        <span class="item-meta">${item.category}</span>
-                        ${stockInfo}
-                    </div>
-                    <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})' ${availableStock === 0 ? 'disabled' : ''}>+</button>
-                `;
-                modalContainer.appendChild(row);
-            });
+            if (!slot) {
+                modalContainer.innerHTML = "<p class='status-msg'>Select an <b>Order Type</b> and <b>Time Slot</b> to view the menu.</p>";
+            } else {
+                const today = new Date();
+            let isToday = true;
+            if (selectedDate) {
+                const selDateObj = new Date(selectedDate);
+                today.setHours(0,0,0,0);
+                selDateObj.setHours(0,0,0,0);
+                isToday = selDateObj.getTime() === today.getTime();
+                
+                const tomorrow = new Date();
+                tomorrow.setHours(0,0,0,0);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                isTomorrow = selDateObj.getTime() === tomorrow.getTime();
+            }
+            let showStock = false;
+            if (currentMealType === 'lunch' && isToday && logicStatus.lunch_1am) {
+                showStock = true;
+            } else if (currentMealType === 'breakfast') {
+                if (isToday) showStock = true;
+                if (isTomorrow && logicStatus.breakfast_5pm) showStock = true;
+            }
+
+            if (!showStock && isToday) {
+                filteredItems.forEach(item => {
+                    const row = document.createElement('div');
+                    row.className = 'food-item-row';
+                    row.innerHTML = `
+                        <div class="item-details">
+                            <span class="item-name">${item.name} (₹${item.price_full})</span>
+                            <span class="item-meta">${item.category}</span>
+                        </div>
+                        <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})'>+</button>
+                    `;
+                    modalContainer.appendChild(row);
+                });
+            } else if (showStock && isToday) {
+                filteredItems.forEach(item => {
+                    const row = document.createElement('div');
+                    row.className = 'food-item-row';
+                    const availableStock = item.prebook_pool;
+                    const stockInfo = availableStock > 0 ? `<span class="stock-info">${availableStock} pre-book available</span>` : `<span class="stock-info unavailable">Pre-book Sold Out</span>`;
+                    row.innerHTML = `
+                        <div class="item-details">
+                            <span class="item-name">${item.name} (₹${item.price_full})</span>
+                            <span class="item-meta">${item.category}</span>
+                            ${stockInfo}
+                        </div>
+                        <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})' ${availableStock <= 0 ? 'disabled' : ''}>+</button>
+                    `;
+                    modalContainer.appendChild(row);
+                });
+                } else {
+                    filteredItems.forEach(item => {
+                        const row = document.createElement('div');
+                        row.className = 'food-item-row';
+                        row.innerHTML = `
+                            <div class="item-details">
+                                <span class="item-name">${item.name} (₹${item.price_full})</span>
+                                <span class="item-meta">${item.category}</span>
+                            </div>
+                        <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})'>+</button>
+                        `;
+                        modalContainer.appendChild(row);
+                    });
+                }
         }
     }
 }
+
 // Updated logic for Breakfast/Lunch and Category constraints
 function addItemToPlan(item) {
-    // Check stock availability
-    const availableStock = item.prebook_pool > 0 ? item.prebook_pool : item.walkin_pool;
-    if (availableStock <= 0) {
-        alert(`❌ ${item.name} is out of stock!`);
-        return;
+    let requiresStockCheck = false;
+    if (selectedDate) {
+        const today = new Date();
+        const selDate = new Date(selectedDate);
+        today.setHours(0,0,0,0);
+        selDate.setHours(0,0,0,0);
+        
+        let isToday = selDate.getTime() === today.getTime();
+        
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        let isTomorrow = selDate.getTime() === tomorrow.getTime();
+
+        if (currentMealType === 'lunch' && isToday && logicStatus.lunch_1am) {
+            requiresStockCheck = true;
+        } else if (currentMealType === 'breakfast') {
+            if (isToday) requiresStockCheck = true;
+            if (isTomorrow && logicStatus.breakfast_5pm) requiresStockCheck = true;
+        }
     }
 
-    // Check if already added (against available stock)
-    const itemCountInCart = cart.filter(i => i.id === item.id).length;
-    if (itemCountInCart >= availableStock) {
-        alert(`❌ Only ${availableStock} of ${item.name} available. You've already added ${itemCountInCart}.`);
-        return;
+    if (requiresStockCheck) {
+        const availableStock = currentViewMode === 'pre-order' ? item.prebook_pool : item.walkin_pool;
+        if (availableStock <= 0) {
+            alert(`❌ ${item.name} is out of stock!`);
+            return;
+        }
+        // Check if already added (against available stock)
+        const cartEntry = cart.find(i => i.item.id === item.id);
+        const itemCountInCart = cartEntry ? cartEntry.quantity : 0;
+        if (itemCountInCart >= availableStock) {
+            alert(`❌ Only ${availableStock} of ${item.name} available. You've already added ${itemCountInCart}.`);
+            return;
+        }
     }
 
-    const mealCount = cart.filter(i => i.category === 'meal').length;
-    const curryCount = cart.filter(i => i.category === 'curry').length;
-    const sideCount = cart.filter(i => i.category === 'side').length;
+    // For countable items, the entire batch counts as 1 meal/seat. Otherwise, count by quantity.
+    const mealCount = cart.filter(i => i.item.category === 'meal').reduce((sum, i) => sum + (i.item.is_countable ? 1 : i.quantity), 0);
+    const curryCount = cart.filter(i => i.item.category === 'curry').reduce((sum, i) => sum + (i.item.is_countable ? 1 : i.quantity), 0);
+    const sideCount = cart.filter(i => i.item.category === 'side').reduce((sum, i) => sum + (i.item.is_countable ? 1 : i.quantity), 0);
 
     // 1. Capacity Check: Seats reserved define the max meals
-    if (item.category === 'meal' && mealCount >= allowedFoodCount) {
+    const isExistingCountable = item.is_countable && cart.some(i => i.item.id === item.id);
+    if (item.category === 'meal' && mealCount >= allowedFoodCount && !isExistingCountable) {
         alert(`You have reserved ${allowedFoodCount} seats. Max ${allowedFoodCount} meals allowed.`);
         return;
     }
@@ -291,12 +801,112 @@ function addItemToPlan(item) {
         return;
     }
 
-    // 4. Portion Logic
-    if (item.has_portions) {
+    // 4. Portion & Countable Logic
+    if (item.is_countable) {
+        openQuantityModal(item, requiresStockCheck);
+    } else if (item.has_portions) {
         openPortionModal(item); // Pops up Half/Full options
     } else {
-        addToCart(item.id, item.name, 'Full', item.price_full, item.category); // Fixed items like Omelette
+        addToCart(item, 1, 'Full', item.price_full); // Fixed items like Omelette
     }
+}
+
+function openQuantityModal(item, requiresStockCheck) {
+    // --- Calculate Limits Before Opening Modal ---
+    const availableStock = currentViewMode === 'pre-order' ? item.prebook_pool : item.walkin_pool;
+    const cartEntry = cart.find(i => i.item.id === item.id);
+    const itemCountInCart = cartEntry ? cartEntry.quantity : 0;
+    
+    let maxFromStock = requiresStockCheck ? (availableStock - itemCountInCart) : 999;
+    
+    // Countable item constraints: Max 5 total per item, Min 2 initially (or 1 if adding to existing)
+    let maxAllowed = Math.min(maxFromStock, 5 - itemCountInCart);
+    let minAllowed = itemCountInCart >= 2 ? 1 : 2;
+
+    if (maxAllowed <= 0) {
+        alert(`You have reached the maximum limit (5) for ${item.name} or it is out of stock.`);
+        return;
+    }
+    
+    if (maxAllowed < minAllowed) {
+        alert(`Not enough stock to meet the minimum order of ${minAllowed}.`);
+        return;
+    }
+
+    let modal = document.getElementById('quantity-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'quantity-modal';
+        modal.className = 'modal-overlay';
+        modal.style.zIndex = '999999'; // Ensure it strictly appears above the cart modal
+        document.body.appendChild(modal);
+    }
+
+    let currentQty = minAllowed;
+
+    // Always inject fresh HTML to guarantee structure and wipe old event listeners
+    modal.innerHTML = `
+        <div class="modal-content booking-card" style="max-width: 320px; text-align: center; background: #fff; color: #333;">
+            <h3 id="qty-item-name" style="color: #222;">${item.name}</h3>
+            <p style="margin-bottom: 15px; color: #666;">Select quantity (Min: ${minAllowed}, Max: ${maxAllowed})</p>
+            <div style="display: flex; justify-content: center; align-items: center; gap: 20px; margin-bottom: 20px;">
+                <button type="button" id="qty-minus" class="btn-action" style="padding: 10px; font-size: 1.5rem; width: 50px; margin-top: 0; line-height: 1;">-</button>
+                <span id="qty-value" style="font-size: 1.5rem; font-weight: bold; color: #333; min-width: 30px; display: inline-block;">${currentQty}</span>
+                <button type="button" id="qty-plus" class="btn-action" style="padding: 10px; font-size: 1.5rem; width: 50px; margin-top: 0; line-height: 1;">+</button>
+            </div>
+            <div class="btn-group" style="display: flex; gap: 10px;">
+                <button type="button" id="qty-confirm" class="btn-confirm" style="margin-top: 0;">Add to Cart</button>
+                <button type="button" id="qty-cancel" class="btn-action" style="margin-top: 0; background: #888;">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    const qtyValue = document.getElementById('qty-value');
+    const plusBtn = document.getElementById('qty-plus');
+    const minusBtn = document.getElementById('qty-minus');
+    const confirmBtn = document.getElementById('qty-confirm');
+    
+    modal.style.display = 'flex';
+
+    // --- UI Update Function ---
+    function updateUI() {
+        qtyValue.innerText = currentQty;
+        plusBtn.disabled = currentQty >= maxAllowed;
+        minusBtn.disabled = currentQty <= minAllowed;
+        confirmBtn.disabled = maxAllowed === 0;
+    }
+
+    // --- Event Listeners ---
+    minusBtn.onclick = (e) => { 
+        e.preventDefault();
+        if (currentQty > minAllowed) {
+            currentQty--;
+            updateUI();
+        }
+    };
+    
+    plusBtn.onclick = (e) => { 
+        e.preventDefault();
+        if (currentQty < maxAllowed) {
+            currentQty++;
+            updateUI();
+        }
+    };
+    
+    document.getElementById('qty-cancel').onclick = (e) => { e.preventDefault(); modal.style.display = 'none'; };
+    
+    confirmBtn.onclick = (e) => {
+        e.preventDefault();
+        if (currentQty > maxAllowed) {
+            alert(`You can only add up to ${maxAllowed} more of this item.`);
+            return;
+        }
+        addToCart(item, currentQty, 'Full', item.price_full);
+        modal.style.display = 'none';
+    };
+
+    // --- Initial State ---
+    updateUI();
 }
 
 function openPortionModal(item) {
@@ -304,17 +914,36 @@ function openPortionModal(item) {
     modal.style.display = 'flex';
     
     document.getElementById('half-btn').onclick = () => {
-        addToCart(item.id, item.name, 'Half', item.price_half, item.category);
+        addToCart(item, 1, 'Half', item.price_half);
         modal.style.display = 'none';
     };
     document.getElementById('full-btn').onclick = () => {
-        addToCart(item.id, item.name, 'Full', item.price_full, item.category);
+        addToCart(item, 1, 'Full', item.price_full);
         modal.style.display = 'none';
     };
 }
 
-function addToCart(id, name, portion, price, category) {
-    cart.push({ id, name, portion, price, category });
+function editCartItem(cartId) {
+    const itemIndex = cart.findIndex(i => i.cartId === cartId);
+    if (itemIndex === -1) return;
+
+    const itemToEdit = cart[itemIndex].item;
+    
+    // Remove the item from the cart before re-triggering the add flow
+    cart.splice(itemIndex, 1);
+    
+    // Update UI
+    renderCart();
+    validateFinalButton();
+
+    // Trigger the add flow again for this item, which will open the relevant modal
+    addItemToPlan(itemToEdit);
+}
+
+function addToCart(item, quantity, portion, price) {
+    // Generate a highly compatible unique ID for this specific cart entry
+    const cartId = Date.now().toString() + Math.random().toString().slice(2);
+    cart.push({ cartId, item, quantity, portion, price });
     renderCart();
     validateFinalButton();
 }
@@ -322,13 +951,27 @@ function addToCart(id, name, portion, price, category) {
 function renderCart() {
     const list = document.getElementById('cart-summary-list');
     if (!list) return;
-    list.innerHTML = cart.map((item, index) => `
-        <li>${item.name} <button onclick="removeFromCart(${index})">x</button></li>
-    `).join('');
+    list.innerHTML = cart.map(cartItem => {
+        let name = cartItem.item.name;
+        if (cartItem.item.has_portions && cartItem.portion) name += ` (${cartItem.portion})`;
+        if (cartItem.quantity > 1) name += ` (x${cartItem.quantity})`;
+
+        const editBtn = (cartItem.item.is_countable || cartItem.item.has_portions)
+            ? `<button class="edit-cart-item-btn" onclick="editCartItem('${cartItem.cartId}')">Edit</button>`
+            : '';
+
+        return `<li data-cart-id="${cartItem.cartId}">
+                    <span>${name}</span>
+                    <div class="cart-item-actions">
+                        ${editBtn}
+                        <button class="remove-cart-item-btn" onclick="removeFromCart('${cartItem.cartId}')">x</button>
+                    </div>
+                </li>`;
+    }).join('');
 }
 
-function removeFromCart(index) {
-    cart.splice(index, 1);
+function removeFromCart(cartId) {
+    cart = cart.filter(item => item.cartId !== cartId);
     renderCart();
     validateFinalButton();
 }
@@ -341,8 +984,8 @@ async function checkSlotAvailability() {
     const slot = document.getElementById('time-slot').value;
     const type = document.getElementById('order-type').value;
 
-    if (type === 'parcel' && slot) {
-        const response = await fetch(`http://127.0.0.1:8000/check-capacity/${slot}`);
+    if (type === 'parcel' && slot && selectedDate) {
+        const response = await fetch(`http://127.0.0.1:8000/check-capacity/${slot}/${selectedDate}`);
         const data = await response.json();
         
         if (data.remaining <= 0) {
@@ -357,17 +1000,41 @@ function validateFinalButton() {
     const confirmBtn = document.getElementById('final-confirm');
     const type = document.getElementById('order-type').value;
     const slot = document.getElementById('time-slot').value;
-
-    let isReady = (slot !== "" && type !== "" && cart.length === allowedFoodCount && allowedFoodCount > 0);
+    const mealCount = cart.filter(i => i.item.category === 'meal').reduce((sum, i) => sum + (i.item.is_countable ? 1 : i.quantity), 0);
+    // New Rule: The number of main meals must exactly match the number of seats/parcels selected.
+    let isReady = (slot !== "" && type !== "" && mealCount > 0 && mealCount === allowedFoodCount && allowedFoodCount > 0);
     confirmBtn.disabled = !isReady;
+}
+
+
+function onConfirmAndPay() {
+    // Only require payment for pre-order bookings
+    if (currentViewMode === 'pre-order') {
+        document.getElementById('payment-modal').style.display = 'flex';
+    } else {
+        processBooking();
+    }
+}
+
+function closePaymentModal() {
+    document.getElementById('payment-modal').style.display = 'none';
+}
+
+function completeDummyPayment() {
+    closePaymentModal();
+    processBooking();
 }
 
 async function processBooking() {
     const payload = {
         admission_no: localStorage.getItem("admission_no"),
-        item_ids: cart.map(i => i.id),
+        items: cart.map(cartItem => ({
+            item_id: cartItem.item.id,
+            quantity: cartItem.quantity
+        })),
         scheduled_slot: document.getElementById('time-slot').value,
         order_type: document.getElementById('order-type').value,
+        booking_date: selectedDate,
         seat_ids: selectedSeatIds
     };
 
@@ -381,6 +1048,7 @@ async function processBooking() {
         alert("Booking Successful!");
         location.reload();
     } else {
-        alert("Booking failed. Please check capacity.");
+        const err = await response.json();
+        alert(`Booking failed: ${err.detail}`);
     }
 }
