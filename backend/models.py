@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, Time, ForeignKey, Date
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Time, ForeignKey, Date, Text
 from sqlalchemy.orm import relationship
 from .database import Base, engine
 from . import time_logic
@@ -17,8 +17,10 @@ class FoodItem(Base):
     __tablename__ = "food_items"
     id = Column(Integer, primary_key=True)
     name = Column(String)
+    description = Column(Text, default="")
+    image_url = Column(String, default="")
     price_full = Column(Integer)
-    price_half = Column(Integer, nullable=True)
+    price_half = Column(Integer, default=0)
     category = Column(String)
     meal_type = Column(String)
     has_portions = Column(Boolean, default=True)
@@ -93,3 +95,9 @@ class Holiday(Base):
     __tablename__ = "holidays"
     id = Column(Integer, primary_key=True, index=True)
     date = Column(Date, unique=True, nullable=False)
+
+class LogicRun(Base):
+    __tablename__ = 'logic_runs'
+    id = Column(Integer, primary_key=True)
+    logic_name = Column(String, nullable=False) # e.g., 'lunch_1am'
+    last_run_date = Column(Date, nullable=False)

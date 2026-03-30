@@ -52,6 +52,9 @@ class BookingCreate(BaseModel):
 class FoodItemCreate(BaseModel):
     name: str
     price_full: int
+    price_half: Optional[int] = 0
+    description: Optional[str] = ""
+    image_url: Optional[str] = ""
     category: str
     meal_type: str
     has_portions: bool = False
@@ -60,11 +63,18 @@ class FoodItemCreate(BaseModel):
 class FoodItemUpdate(BaseModel):
     name: Optional[str] = None
     price_full: Optional[int] = None
+    price_half: Optional[int] = None
+    description: Optional[str] = None
+    image_url: Optional[str] = None
     category: Optional[str] = None
     meal_type: Optional[str] = None
     has_portions: Optional[bool] = None
     is_walkin_only: Optional[bool] = None
     is_countable: Optional[bool] = None
+    admin_base_stock: Optional[int] = None
+    prebook_pool: Optional[int] = None
+    walkin_pool: Optional[int] = None
+    breakfast_buffer: Optional[int] = None
 
 class FoodItem(FoodItemCreate):
     id: int
@@ -76,13 +86,12 @@ class FoodItem(FoodItemCreate):
     class Config:
         from_attributes = True
 
-# Schema for the Admin to manually update stocks
-class StockUpdate(BaseModel):
-    admin_base_stock: int
+# Schema for the Admin to manually update daily stock pools
+class DailyStockUpdate(BaseModel):
+    admin_base_stock: Optional[int] = None
+    prebook_pool: Optional[int] = None
+    walkin_pool: Optional[int] = None
     breakfast_buffer: Optional[int] = None
-
-    class Config:
-        from_attributes = True
 
 # Schemas for Order History
 class SeatInfo(BaseModel):

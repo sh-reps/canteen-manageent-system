@@ -9,28 +9,6 @@ print("[DEBUG] PYTHON:", sys.executable)
 from fastapi import APIRouter, FastAPI, Depends, HTTPException, status, Query, Body, Request
 app = FastAPI(title="Canteen Management System API")
 
-# Endpoint to check if 1am/7am logic has run for today
-@app.get("/stock-logic-status")
-def get_stock_logic_status():
-    from . import time_logic
-    now = time_logic.get_current_time()
-def get_stock_logic_status(db: Session = Depends(get_db)):
-    from . import time_logic, models
-    today = time_logic.get_current_date()
-
-    lunch_1am_run = db.query(models.LogicRun).filter(models.LogicRun.logic_name == 'lunch_1am').first()
-    breakfast_5pm_run = db.query(models.LogicRun).filter(models.LogicRun.logic_name == 'breakfast_5pm').first()
-    breakfast_7am_run = db.query(models.LogicRun).filter(models.LogicRun.logic_name == 'breakfast_7am').first()
-
-    return {
-        "lunch_1am": now.hour >= 1,
-        "breakfast_5pm": now.hour >= 17,
-        "breakfast_7am": now.hour >= 7,
-        "lunch_1am": lunch_1am_run and lunch_1am_run.last_run_date == today,
-        "breakfast_5pm": breakfast_5pm_run and breakfast_5pm_run.last_run_date == today,
-        "breakfast_7am": breakfast_7am_run and breakfast_7am_run.last_run_date == today,
-    }
-
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -69,6 +47,22 @@ conf = ConnectionConfig(
 from . import models, schemas, database, stock_logic, time_logic
 from .database import engine, get_db
 
+# Endpoint to check if 1am/7am logic has run for today
+@app.get("/stock-logic-status")
+def get_stock_logic_status(db: Session = Depends(get_db)):
+    from . import time_logic, models
+    today = time_logic.get_current_date()
+
+    runs = db.query(models.LogicRun).filter(models.LogicRun.last_run_date == today).all()
+    run_names = {run.logic_name for run in runs}
+
+    return {
+        "lunch_1am": "lunch_1am" in run_names,
+        "breakfast_5pm": "breakfast_5pm" in run_names,
+        "breakfast_7am": "breakfast_7am" in run_names,
+        "lunch_11am": "lunch_11am" in run_names,
+    }
+
 # Create the database tables if they don't exist
 models.Base.metadata.create_all(bind=engine)
 
@@ -80,6 +74,11 @@ try:
         conn.execute(text("ALTER TABLE booked_items ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;"))
         # Automatically add the section column to seats and safely assign the default value to existing rows
         conn.execute(text("ALTER TABLE seats ADD COLUMN IF NOT EXISTS section VARCHAR DEFAULT 'student';"))
+        conn.execute(text("ALTER TABLE food_items ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';"))
+        conn.execute(text("ALTER TABLE food_items ADD COLUMN IF NOT EXISTS image_url VARCHAR DEFAULT '';"))
+        conn.execute(text("ALTER TABLE food_items ADD COLUMN IF NOT EXISTS price_half INTEGER DEFAULT 0;"))
+        # Forcefully drop the old unique constraint to stop the 500 errors
+        conn.execute(text("ALTER TABLE logic_runs DROP CONSTRAINT IF EXISTS logic_runs_logic_name_key;"))
 except Exception as e:
     print(f"[DEBUG] Schema auto-update error: {e}")
 
@@ -98,6 +97,35 @@ try:
         print("✅ SUCCESS: Staff seats created automatically.")
 finally:
     db.close()
+
+import asyncio
+
+async def automated_stock_logic_runner():
+    """Background task that polls simulated time to trigger stock logic automatically."""
+    print("[INFO] Background stock logic scheduler started.")
+    last_checked_minute = None
+    while True:
+        try:
+            now = time_logic.get_current_datetime()
+            current_minute = (now.year, now.month, now.day, now.hour, now.minute)
+            
+            # Only hit the database when the clock's minute rolls over
+            if current_minute != last_checked_minute:
+                db = database.SessionLocal()
+                try:
+                    stock_logic.evaluate_time_triggers(db)
+                finally:
+                    db.close()
+                last_checked_minute = current_minute
+        except Exception as e:
+            print(f"[BACKGROUND TASK ERROR] {e}")
+        
+        # Super fast 1-second polling (very efficient since it's just checking memory)
+        await asyncio.sleep(1) 
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(automated_stock_logic_runner())
 
 
 app.add_middleware(
@@ -154,27 +182,58 @@ class TimeModel(BaseModel):
 class DateModel(BaseModel):
     date: str
 
+class DateTimeModel(BaseModel):
+    date: str
+    time: str
+
 @app.post("/api/admin/set-time")
-def set_time(time_data: TimeModel):
+def set_time(time_data: TimeModel, db: Session = Depends(get_db)):
     time_logic.set_simulated_time(time_data.time)
+    # Wipe today's logic runs to allow repeatable testing of triggers
+    today = time_logic.get_current_date()
+    db.query(models.LogicRun).filter(models.LogicRun.last_run_date == today).delete(synchronize_session=False)
+    db.commit()
+    stock_logic.evaluate_time_triggers(db)
     return {"message": f"Time set to {time_data.time}"}
 
 @app.post("/api/admin/set-date")
-def set_date(date_data: DateModel):
+def set_date(date_data: DateModel, db: Session = Depends(get_db)):
     time_logic.set_simulated_date(date_data.date)
+    today = time_logic.get_current_date()
+    db.query(models.LogicRun).filter(models.LogicRun.last_run_date == today).delete(synchronize_session=False)
+    db.commit()
+    stock_logic.evaluate_time_triggers(db)
     return {"message": f"Date set to {date_data.date}"}
+
+@app.post("/api/admin/set-datetime")
+def set_datetime(data: DateTimeModel, db: Session = Depends(get_db)):
+    time_logic.set_simulated_datetime(data.date, data.time)
+    today = time_logic.get_current_date()
+    db.query(models.LogicRun).filter(models.LogicRun.last_run_date == today).delete(synchronize_session=False)
+    db.commit()
+    stock_logic.evaluate_time_triggers(db)
+    return {"message": "Date and Time updated successfully."}
+
+@app.post("/api/admin/reset-time")
+def reset_time(db: Session = Depends(get_db)):
+    time_logic.reset_simulation()
+    today = time_logic.get_current_date()
+    db.query(models.LogicRun).filter(models.LogicRun.last_run_date == today).delete(synchronize_session=False)
+    db.commit()
+    stock_logic.evaluate_time_triggers(db)
+    return {"message": "System time reset to real time."}
 
 @app.get("/api/time")
 def get_time():
     return {"time": time_logic.get_current_time().isoformat()}
     
 
-@app.get("/food-items", response_model=List[schemas.FoodItem])
-def get_all_food(day: str = Query(None)):
+@app.get("/food-items")
+def get_all_food(day: str = Query(None), db: Session = Depends(get_db)):
     """Fetch all available food items for the menu, for a specific day of week (e.g. 'monday')."""
     # Use new day-based stock logic
     from . import stock_logic
-    return stock_logic.get_all_food_items(day)
+    return stock_logic.get_all_food_items(db, day)
 
 @app.get("/available-seats/{section}/{slot}/{booking_date}")
 def get_seats_by_slot(section: str, slot: str, booking_date: date, db: Session = Depends(get_db)):
@@ -254,9 +313,18 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
         current_date = get_current_date()
         current_time = get_current_time()
 
-        for cart_item in booking_data.items:
+        # Sort items by item_id to prevent database deadlocks during concurrent bookings
+        sorted_items = sorted(booking_data.items, key=lambda x: x.item_id)
+
+        for cart_item in sorted_items:
             booked_item = models.BookedItem(booking_id=new_booking.id, food_item_id=cart_item.item_id, quantity=cart_item.quantity)
             db.add(booked_item)
+
+            # --- Live Base Stock Update ---
+            # Increment the base stock for the item on its booking day immediately.
+            day_of_week_for_booking = booking_data.booking_date.strftime('%A').lower()
+            stock_for_booking_day = get_or_create_stock(db, cart_item.item_id, day_of_week_for_booking)
+            stock_for_booking_day.admin_base_stock += cart_item.quantity
 
             food_item = db.query(models.FoodItem).filter(models.FoodItem.id == cart_item.item_id).first()
 
@@ -270,12 +338,11 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
                     deplete_stock = True
 
                 if deplete_stock:
-                    day_of_week = booking_data.booking_date.strftime('%A').lower()
-                    stock = get_or_create_stock(db, cart_item.item_id, day_of_week)
-                    if stock.prebook_pool >= cart_item.quantity:
-                        stock.prebook_pool -= cart_item.quantity
+                    # Note: We use stock_for_booking_day here as it's a same-day booking
+                    if stock_for_booking_day.prebook_pool >= cart_item.quantity:
+                        stock_for_booking_day.prebook_pool -= cart_item.quantity
                     else:
-                        raise HTTPException(status_code=400, detail=f"Not enough pre-book stock for {food_item.name}. Available: {stock.prebook_pool}, Requested: {cart_item.quantity}.")
+                        raise HTTPException(status_code=400, detail=f"Not enough pre-book stock for {food_item.name}. Available: {stock_for_booking_day.prebook_pool}, Requested: {cart_item.quantity}.")
 
         # 6. Handle Seat Reservations
         if booking_data.order_type == "sit-in":
@@ -380,8 +447,8 @@ async def forgot_password(req: schemas.ForgotPasswordRequest, db: Session = Depe
     except Exception as e:
         print(f"Failed to send email: {e}")
         # Even if email fails, don't expose the error to the user.
-    finally:
-        return {"message": "If an account with that admission number exists and has an email, a reset link has been sent."}
+
+    return {"message": "If an account with that admission number exists and has an email, a reset link has been sent."}
 
 @app.post("/api/reset-password")
 def reset_password(req: schemas.ResetPasswordRequest, db: Session = Depends(get_db)):
@@ -491,38 +558,40 @@ def cancel_order(booking_id: int, db: Session = Depends(get_db)):
     meal_type = booking.items[0].food_item.meal_type
 
     # Determine refund eligibility and where to return stock
-    current_date = time_logic.get_current_date()
-    now = time_logic.get_current_time_as_time()
+    current_datetime = time_logic.get_current_datetime()
+    
     refund_eligible = False
     return_to_prebook = True
-    if booking.booking_date == current_date:
-        if meal_type == 'breakfast':
-            cutoff_time = datetime.strptime("07:00:00", "%H:%M:%S").time()
-            if now < cutoff_time:
-                refund_eligible = True
-                return_to_prebook = True
-            else:
-                refund_eligible = False
-                return_to_prebook = False  # After 7am, goes to walk-in
-        elif meal_type == 'lunch':
-            cutoff_time = datetime.strptime("09:00:00", "%H:%M:%S").time()
-            if now < cutoff_time:
-                refund_eligible = True
-                return_to_prebook = True
-            else:
-                refund_eligible = False
-                return_to_prebook = False  # After 9am, goes to walk-in
-    else:
-        # If not same day, no refund, goes to walk-in
-        refund_eligible = False
-        return_to_prebook = False
+    
+    if meal_type == 'breakfast':
+        cutoff_datetime = datetime.combine(booking.booking_date, datetime.strptime("07:00:00", "%H:%M:%S").time())
+        if current_datetime < cutoff_datetime:
+            refund_eligible = True
+            return_to_prebook = True
+        else:
+            refund_eligible = False
+            return_to_prebook = False  # After 7am on booking day, goes to walk-in
+    elif meal_type == 'lunch':
+        cutoff_datetime = datetime.combine(booking.booking_date, datetime.strptime("09:00:00", "%H:%M:%S").time())
+        if current_datetime < cutoff_datetime:
+            refund_eligible = True
+            return_to_prebook = True
+        else:
+            refund_eligible = False
+            return_to_prebook = False  # After 9am on booking day, goes to walk-in
 
     # Return items to correct pool
     day_of_week = booking.booking_date.strftime('%A').lower()
-    for booked_item in booking.items:
+    
+    # Sort items by food_item_id to prevent deadlocks
+    sorted_cancel_items = sorted(booking.items, key=lambda x: x.food_item_id)
+    for booked_item in sorted_cancel_items:
         quantity_to_return = booked_item.quantity
         # Get the correct stock record for the booking date
         stock = stock_logic.get_or_create_stock(db, booked_item.food_item_id, day_of_week)
+        # Decrement the base stock that was added when the order was placed
+        stock.admin_base_stock = max(0, stock.admin_base_stock - quantity_to_return)
+
         if return_to_prebook:
             stock.prebook_pool += quantity_to_return
         else:
@@ -604,15 +673,19 @@ def complete_order(order_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/food-items", status_code=201)
-def create_food_item(item: schemas.FoodItemCreate, db: Session = Depends(get_db)):
+async def create_food_item(request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
     # The 'id' will be generated by the database automatically
     new_item = models.FoodItem(
-        name=item.name,
-        price_full=item.price_full,
-        category=item.category,
-        meal_type=item.meal_type,
-        has_portions=item.has_portions,
-        is_countable=item.is_countable,
+        name=data.get("name"),
+        price_full=data.get("price_full"),
+        price_half=data.get("price_half", 0),
+        category=data.get("category"),
+        meal_type=data.get("meal_type"),
+        has_portions=data.get("has_portions", False),
+        is_countable=data.get("is_countable", False),
+        description=data.get("description", ""),
+        image_url=data.get("image_url", ""),
         admin_base_stock=0,
         prebook_pool=0,
         walkin_pool=0,
@@ -624,12 +697,12 @@ def create_food_item(item: schemas.FoodItemCreate, db: Session = Depends(get_db)
     return new_item
 
 @app.patch("/api/food-items/{food_id}")
-def edit_food_item(food_id: int, data: schemas.FoodItemUpdate, db: Session = Depends(get_db)):
+async def edit_food_item(food_id: int, request: Request, db: Session = Depends(get_db)):
     item = db.query(models.FoodItem).filter(models.FoodItem.id == food_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Food item not found")
     
-    update_data = data.dict(exclude_unset=True)
+    update_data = await request.json()
     for key, value in update_data.items():
         setattr(item, key, value)
         
@@ -656,37 +729,61 @@ def seed_orders(payload: dict = Body(...), db: Session = Depends(get_db)):
     from datetime import datetime
     
     seed_date_str = payload.get("date")
-    meal_type = payload.get("meal_type")
     
-    if not seed_date_str or not meal_type:
-        raise HTTPException(status_code=400, detail="Missing date or meal_type")
+    if not seed_date_str:
+        raise HTTPException(status_code=400, detail="Missing date")
         
     seed_date = datetime.strptime(seed_date_str, "%Y-%m-%d").date()
     
     users = db.query(models.User).all()
-    food_items = db.query(models.FoodItem).filter(models.FoodItem.meal_type == meal_type).all()
+    all_food_items = db.query(models.FoodItem).all()
+    breakfast_items = [f for f in all_food_items if f.meal_type == 'breakfast']
+    lunch_items = [f for f in all_food_items if f.meal_type == 'lunch']
     all_seats = db.query(models.Seat).all()
     
-    if not users or not food_items:
+    if not users or not all_food_items:
         raise HTTPException(status_code=400, detail="Database needs users and food items to seed orders.")
         
-    main_meals = [f for f in food_items if f.category == 'meal']
-    if not main_meals:
-        main_meals = food_items # Fallback if no specific 'meal' category exists
-        
-    slots = ["08:00", "08:30", "09:00"] if meal_type == "breakfast" else ["12:00", "12:15", "12:30", "12:45", "13:00", "13:15", "13:30"]
-    order_type = "sit-in" if meal_type == "breakfast" else "parcel"
-    
     # Track used seats to avoid collisions during seeding
     existing_res = db.query(models.SeatReservation).filter(models.SeatReservation.reservation_date == seed_date).all()
-    used_seats = {slot: set() for slot in slots}
+    
+    # Define all possible slots to correctly initialize the used_seats tracker
+    all_possible_slots = ["08:00", "08:30", "09:00", "12:00", "12:15", "12:25", "12:30", "12:45", "12:50", "13:00", "13:15", "13:30"]
+    used_seats = {slot: set() for slot in all_possible_slots}
     for r in existing_res:
         if r.time_slot in used_seats:
             used_seats[r.time_slot].add(r.seat_id)
             
     orders_created = 0
-    for _ in range(50): # Generate 50 orders
+    stock_increments = {}
+
+    for _ in range(200): # Generate 200 orders
         user = random.choice(users)
+        meal_type = random.choice(["breakfast", "lunch"])
+        food_items = breakfast_items if meal_type == "breakfast" else lunch_items
+        
+        if not food_items:
+            continue # Skip if no items exist for this meal type
+            
+        main_meals = [f for f in food_items if f.category == 'meal']
+        if not main_meals:
+            main_meals = food_items # Fallback if no specific 'meal' category exists
+            
+        # Determine order type and slots for each iteration
+        order_type = ""
+        slots = []
+        if meal_type == "breakfast":
+            order_type = "sit-in"
+            slots = ["08:00", "08:30", "09:00"]
+        elif meal_type == "lunch":
+            order_type = random.choice(["sit-in", "parcel"])
+            if order_type == "sit-in":
+                slots = ["12:00", "12:25", "12:50", "13:15"]
+            else: # parcel
+                slots = ["12:00", "12:15", "12:30", "12:45", "13:00", "13:15", "13:30"]
+        
+        if not slots: continue # Skip if meal type is not breakfast or lunch
+        
         slot = random.choice(slots)
         seat_to_assign = None
         
@@ -701,18 +798,75 @@ def seed_orders(payload: dict = Body(...), db: Session = Depends(get_db)):
         db.add(new_booking)
         db.flush() # Flush to get the new_booking.id
         
-        meal = random.choice(main_meals)
-        qty = random.randint(2, 5) if meal.is_countable else 1
-        db.add(models.BookedItem(booking_id=new_booking.id, food_item_id=meal.id, quantity=qty))
+        # Select items for this order
+        items_to_order = []
+        main_meal = random.choice(main_meals)
+        main_qty = random.randint(2, 5) if main_meal.is_countable else 1
+        items_to_order.append((main_meal, main_qty))
+        
+        # Randomly add 0 to 2 extra items (curries, sides, drinks) to make the order realistic
+        other_options = [f for f in food_items if f.id != main_meal.id]
+        if other_options:
+            num_extras = random.randint(0, 2)
+            extras = random.sample(other_options, min(num_extras, len(other_options)))
+            for extra in extras:
+                extra_qty = random.randint(1, 3) if extra.is_countable else 1
+                items_to_order.append((extra, extra_qty))
+
+        for item, qty in items_to_order:
+            db.add(models.BookedItem(booking_id=new_booking.id, food_item_id=item.id, quantity=qty))
+            
+            # Accumulate stock increments in memory to update all at once later
+            stock_increments[item.id] = stock_increments.get(item.id, 0) + qty
         
         if order_type == "sit-in" and seat_to_assign:
             db.add(models.SeatReservation(seat_id=seat_to_assign.id, booking_id=new_booking.id, time_slot=slot, reservation_date=seed_date))
             used_seats[slot].add(seat_to_assign.id)
             
         orders_created += 1
+
+    # Apply all stock updates in sorted order exactly ONCE to prevent deadlocks and ensure blazing fast speed
+    from .stock_logic import get_or_create_stock
+    day_of_week_for_seed = seed_date.strftime('%A').lower()
+    
+    for item_id in sorted(stock_increments.keys()):
+        qty = stock_increments[item_id]
+        stock_for_seed_day = get_or_create_stock(db, item_id, day_of_week_for_seed)
+        stock_for_seed_day.admin_base_stock += qty
         
     db.commit()
-    return {"status": "success", "message": f"Successfully generated {orders_created} {meal_type} orders for {seed_date_str}!"}
+    return {"status": "success", "message": f"Successfully generated {orders_created} mixed orders! Remember to trigger the time logic to recalculate stock."}
+
+@app.post("/admin/clear-orders")
+def clear_orders(payload: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import datetime
+    date_str = payload.get("date")
+    
+    if not date_str:
+        raise HTTPException(status_code=400, detail="Missing date")
+        
+    target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    
+    # Find all bookings for this date
+    bookings = db.query(models.Booking).filter(models.Booking.booking_date == target_date).all()
+    booking_ids = [b.id for b in bookings]
+    
+    if not booking_ids:
+        return {"status": "success", "message": f"No orders found for {target_date}."}
+        
+    # Delete child records first to respect foreign key constraints
+    db.query(models.SeatReservation).filter(models.SeatReservation.booking_id.in_(booking_ids)).delete(synchronize_session=False)
+    db.query(models.BookedItem).filter(models.BookedItem.booking_id.in_(booking_ids)).delete(synchronize_session=False)
+    db.query(models.Booking).filter(models.Booking.id.in_(booking_ids)).delete(synchronize_session=False)
+    
+    # Reset the live stock counters for that day so it's a completely clean slate
+    day_of_week = target_date.strftime('%A').lower()
+    db.query(models.FoodStock).filter(models.FoodStock.day_of_week == day_of_week).update(
+        {"admin_base_stock": 0, "prebook_pool": 0, "walkin_pool": 0}, synchronize_session=False
+    )
+    
+    db.commit()
+    return {"status": "success", "message": f"Successfully cleared {len(booking_ids)} orders for {target_date} and reset the live stock."}
 
 # --- Breakfast Specific Admin Endpoints ---
 @app.post("/admin/set-breakfast-buffer/{food_id}")
@@ -760,9 +914,28 @@ def update_food_stock(food_id: int, day: str = Body(...), admin_base_stock: int 
     db.commit()
     db.close()
     return {"message": "Stock updated", "food_id": food_id, "day": day}
+
+# Endpoint: Admin manually updates live stock pools for a specific day
+@app.patch("/api/stock/{day}/{food_id}")
+def update_daily_stock(day: str, food_id: int, data: schemas.DailyStockUpdate, db: Session = Depends(get_db)):
+    from .stock_logic import get_or_create_stock
+    stock = get_or_create_stock(db, food_id, day)
+    
+    if data.admin_base_stock is not None:
+        stock.admin_base_stock = data.admin_base_stock
+    if data.prebook_pool is not None:
+        stock.prebook_pool = data.prebook_pool
+    if data.walkin_pool is not None:
+        stock.walkin_pool = data.walkin_pool
+    if data.breakfast_buffer is not None:
+        stock.breakfast_buffer = data.breakfast_buffer
+        
+    db.commit()
+    return {"status": "success", "message": "Daily stock updated successfully"}
+
 # This endpoint allows admins to manually update stock pools for a food item
 @app.patch("/food-items/{food_id}/stock")
-def update_stock(food_id: int, data: schemas.StockUpdate, db: Session = Depends(get_db)):
+def update_stock(food_id: int, data: schemas.DailyStockUpdate, db: Session = Depends(get_db)):
     item = db.query(models.FoodItem).filter(models.FoodItem.id == food_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Food not found")

@@ -92,7 +92,7 @@ async function loadHistory() {
 
         const allOrders = await response.json();
         
-        const today = new Date();
+        const today = getSimulatedDate();
         today.setHours(0, 0, 0, 0);
 
         const upcomingOrders = allOrders.filter(order => {

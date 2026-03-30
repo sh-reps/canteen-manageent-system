@@ -36,6 +36,111 @@ async function fetchLogicStatus() {
     } catch (e) { logicStatus = {lunch_1am: false, breakfast_7am: false}; }
 }
 
+window.showFoodInfo = function(item) {
+    let modal = document.getElementById('food-info-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'food-info-modal';
+        modal.className = 'modal-overlay';
+        modal.style.zIndex = '9999999';
+        document.body.appendChild(modal);
+    }
+    
+    const priceHtml = item.has_portions 
+        ? `<strong>Full:</strong> ₹${item.price_full} &nbsp;|&nbsp; <strong>Half:</strong> ₹${item.price_half || 'N/A'}` 
+        : `<strong>Price:</strong> ₹${item.price_full}`;
+
+    // --- Conditionally build the stock information block ---
+    let stockHtml = '';
+    const today = getSimulatedDate();
+    today.setHours(0,0,0,0);
+    
+    // If no date is selected yet (viewing from main menu), smartly default to the relevant date
+    let selDate;
+    if (selectedDate) {
+        selDate = new Date(selectedDate);
+    } else {
+        selDate = new Date(today);
+        // If today's cutoff has passed, users viewing the main menu are likely planning for tomorrow
+        if (currentMealType === 'breakfast' && logicStatus.breakfast_5pm) {
+            selDate.setDate(selDate.getDate() + 1);
+        }
+    }
+    selDate.setHours(0,0,0,0);
+    const isToday = selDate.getTime() === today.getTime();
+
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const isTomorrow = selDate.getTime() === tomorrow.getTime();
+
+    let showStock = false;
+    let stockCount = 0;
+    let stockPoolName = '';
+
+    // Determine which pool to show based on view mode and logic status
+    if (currentViewMode === 'pre-order') {
+        stockPoolName = 'Pre-order';
+        if (currentMealType === 'lunch' && isToday && logicStatus.lunch_1am) {
+            showStock = true;
+            stockCount = item.prebook_pool;
+        } else if (currentMealType === 'breakfast' && (isToday || (isTomorrow && logicStatus.breakfast_5pm))) {
+            showStock = true;
+            stockCount = item.prebook_pool;
+        }
+    } else if (currentViewMode === 'walk-in') {
+        stockPoolName = 'Walk-in';
+        if (currentMealType === 'lunch' && isToday && logicStatus.lunch_11am) {
+            showStock = true;
+            stockCount = item.walkin_pool;
+        } else if (currentMealType === 'breakfast') {
+            if (isToday && logicStatus.breakfast_7am) { // Today's breakfast after 7am
+                showStock = true;
+                stockCount = item.walkin_pool;
+            } else if (isTomorrow && logicStatus.breakfast_5pm) { // Tomorrow's breakfast walk-in pool is visible after 5pm today
+                showStock = true;
+                stockCount = item.walkin_pool;
+            }
+        } else if (currentMealType === 'snack' && isToday) { // Snacks are always walk-in for today
+            showStock = true;
+            stockCount = item.walkin_pool;
+        }
+    }
+
+    // Bypassing stock display for drinks entirely
+    if (showStock && item.category !== 'drink') {
+        // Only show stock info if there was an initial base stock (pre-orders),
+        // or if there is currently stock in the pool. This prevents showing "Sold Out"
+        // for items that had zero pre-orders and thus a zero-sized buffer.
+        if (item.admin_base_stock > 0 || stockCount > 0) {
+            const dayName = selDate.toLocaleDateString('en-US', { weekday: 'long' });
+            const stockMessage = stockCount > 0 ? `Only <strong>${stockCount}</strong> left` : 'Sold Out';
+            stockHtml = `
+                <div style="background: #e9f5ff; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 0.9rem; border: 1px solid #b3d9ff; text-align: left;">
+                    <strong style="color: #0056b3; display: block; margin-bottom: 5px;">${stockPoolName} Stock for ${dayName}</strong>
+                    <span style="color: #333;">${stockMessage}</span>
+                </div>
+            `;
+        }
+    }
+
+    const imgHtml = item.image_url ? `<img src="${item.image_url}" alt="${item.name}" style="width: 100%; border-radius: 8px; margin-bottom: 15px; max-height: 180px; object-fit: cover; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">` : '';
+    
+    modal.innerHTML = `
+        <div class="modal-content booking-card" style="max-width: 350px; text-align: center; background: #fff; color: #333; position: relative; padding: 25px;">
+            <button class="close-x" onclick="document.getElementById('food-info-modal').style.display='none'" style="position: absolute; top: 10px; right: 15px; font-size: 1.5rem; background: transparent; border: none; cursor: pointer; color: #333;">&times;</button>
+            ${imgHtml}
+            <h3 style="color: #222; margin-bottom: 10px; font-size: 1.4rem;">${item.name}</h3>
+            <p style="margin-bottom: 15px; font-size: 0.95rem; color: #555; line-height: 1.4;">${item.description || 'No description available for this item.'}</p>
+            ${stockHtml}
+            <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 1.1rem; border: 1px solid #eee;">
+                ${priceHtml}
+            </div>
+            <button class="btn-confirm" onclick="document.getElementById('food-info-modal').style.display='none'" style="width: 100%;">Close</button>
+        </div>
+    `;
+    modal.style.display = 'flex';
+};
+
 function initializeNav() {
     const container = document.querySelector('.container') || document.body;
     if (!container) return;
@@ -190,7 +295,7 @@ async function initializeDatePicker() {
     tilesWrapper.innerHTML = ""; // Clear loader
 
 
-    const today = new Date();
+    const today = getSimulatedDate();
     today.setHours(0,0,0,0);
     const dayOfWeek = today.getDay(); // 0=Sun, 6=Sat
     let startDate, endDate;
@@ -588,11 +693,21 @@ async function fetchMenu() {
     try {
         // Determine the selected booking day (e.g., 'monday')
         let dayParam = '';
+        let targetDateForFetch = null;
+
         if (typeof selectedDate === 'string' && selectedDate) {
-            const dateObj = new Date(selectedDate);
-            // Get weekday name in lowercase (e.g., 'monday')
-            dayParam = dateObj.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+            targetDateForFetch = new Date(selectedDate);
+        } else {
+            // Smart default for main menu fetching
+            const today = getSimulatedDate();
+            targetDateForFetch = new Date(today);
+            if (currentMealType === 'breakfast' && logicStatus.breakfast_5pm) {
+                targetDateForFetch.setDate(targetDateForFetch.getDate() + 1);
+            }
         }
+        
+        dayParam = targetDateForFetch.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+
         let url = 'http://127.0.0.1:8000/food-items';
         if (dayParam) {
             url += `?day=${dayParam}`;
@@ -631,7 +746,7 @@ function renderMenu() {
         } else {
             let isFutureDay = false;
             if (selectedDate) {
-                const today = new Date();
+                const today = getSimulatedDate();
                 const selDate = new Date(selectedDate);
                 today.setHours(0,0,0,0);
                 selDate.setHours(0,0,0,0);
@@ -652,7 +767,8 @@ function renderMenu() {
                 }
 
                 card.innerHTML = `
-                    <h3>${item.name}</h3>
+                    ${item.image_url ? `<img src="${item.image_url}" alt="${item.name}" style="width: 100%; height: 120px; object-fit: cover; border-radius: 6px; cursor: pointer; margin-bottom: 10px;" onclick='showFoodInfo(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})'>` : ''}
+                    <h3>${item.name} <button onclick='showFoodInfo(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})' style="background:none; border:none; cursor:pointer; color:#3498db; padding: 0; font-size: 1.1rem;" title="View Info">ℹ️</button></h3>
                     <p class="price">₹${item.price_full}</p>
                     ${planBtn}
                     ${infoMsg}
@@ -666,80 +782,58 @@ function renderMenu() {
     if (modalContainer) {
             if (!slot) {
                 modalContainer.innerHTML = "<p class='status-msg'>Select an <b>Order Type</b> and <b>Time Slot</b> to view the menu.</p>";
-            } else {
-                const today = new Date();
-            let isToday = true;
-            if (selectedDate) {
-                const selDateObj = new Date(selectedDate);
+            } else { // Slot is selected, render the menu items
+                const today = getSimulatedDate();
                 today.setHours(0,0,0,0);
-                selDateObj.setHours(0,0,0,0);
-                isToday = selDateObj.getTime() === today.getTime();
-                
-                const tomorrow = new Date();
-                tomorrow.setHours(0,0,0,0);
-                tomorrow.setDate(tomorrow.getDate() + 1);
-                isTomorrow = selDateObj.getTime() === tomorrow.getTime();
-            }
-            let showStock = false;
-            if (currentMealType === 'lunch' && isToday && logicStatus.lunch_1am) {
-                showStock = true;
-            } else if (currentMealType === 'breakfast') {
-                if (isToday) showStock = true;
-                if (isTomorrow && logicStatus.breakfast_5pm) showStock = true;
-            }
+                const selDate = new Date(selectedDate);
+                selDate.setHours(0,0,0,0);
+                const isToday = selDate.getTime() === today.getTime();
 
-            if (!showStock && isToday) {
-                filteredItems.forEach(item => {
-                    const row = document.createElement('div');
-                    row.className = 'food-item-row';
-                    row.innerHTML = `
-                        <div class="item-details">
-                            <span class="item-name">${item.name} (₹${item.price_full})</span>
-                            <span class="item-meta">${item.category}</span>
-                        </div>
-                        <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})'>+</button>
-                    `;
-                    modalContainer.appendChild(row);
-                });
-            } else if (showStock && isToday) {
-                filteredItems.forEach(item => {
-                    const row = document.createElement('div');
-                    row.className = 'food-item-row';
-                    const availableStock = item.prebook_pool;
-                    const stockInfo = availableStock > 0 ? `<span class="stock-info">${availableStock} pre-book available</span>` : `<span class="stock-info unavailable">Pre-book Sold Out</span>`;
-                    row.innerHTML = `
-                        <div class="item-details">
-                            <span class="item-name">${item.name} (₹${item.price_full})</span>
-                            <span class="item-meta">${item.category}</span>
-                            ${stockInfo}
-                        </div>
-                        <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})' ${availableStock <= 0 ? 'disabled' : ''}>+</button>
-                    `;
-                    modalContainer.appendChild(row);
-                });
-                } else {
-                    filteredItems.forEach(item => {
-                        const row = document.createElement('div');
-                        row.className = 'food-item-row';
-                        row.innerHTML = `
-                            <div class="item-details">
-                                <span class="item-name">${item.name} (₹${item.price_full})</span>
-                                <span class="item-meta">${item.category}</span>
-                            </div>
-                        <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})'>+</button>
-                        `;
-                        modalContainer.appendChild(row);
-                    });
+                const tomorrow = new Date(today);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const isTomorrow = selDate.getTime() === tomorrow.getTime();
+
+                let isStockApplicable = false;
+                if (currentMealType === 'lunch' && isToday && logicStatus.lunch_1am) {
+                    isStockApplicable = true;
+                } else if (currentMealType === 'breakfast') {
+                    // For today's breakfast, stock is always checked (as it was set yesterday)
+                    // For tomorrow's breakfast, it's checked only after 5pm today.
+                    if (isToday || (isTomorrow && logicStatus.breakfast_5pm)) {
+                        isStockApplicable = true;
+                    }
                 }
+
+                filteredItems.forEach(item => {
+                    const row = document.createElement('div');
+                    row.className = 'food-item-row';
+
+                    let isItemDisabled = false;
+                    if (isStockApplicable && item.category !== 'drink') {
+                        const stockPool = currentViewMode === 'pre-order' ? item.prebook_pool : item.walkin_pool;
+                        if (stockPool <= 0) {
+                            isItemDisabled = true;
+                        }
+                    }
+
+                    row.innerHTML = `
+                        <div class="item-details">
+                            <span class="item-name">${item.name} <button onclick='showFoodInfo(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})' style="background:none; border:none; cursor:pointer; color:#3498db; padding: 0; margin-right: 5px;" title="View Info">ℹ️</button>(₹${item.price_full})</span>
+                            <span class="item-meta">${item.category}</span>
+                        </div>
+                        <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})' ${isItemDisabled ? 'disabled' : ''}>+</button>
+                    `;
+                    modalContainer.appendChild(row);
+                });
+            }
         }
-    }
 }
 
 // Updated logic for Breakfast/Lunch and Category constraints
 function addItemToPlan(item) {
     let requiresStockCheck = false;
     if (selectedDate) {
-        const today = new Date();
+        const today = getSimulatedDate();
         const selDate = new Date(selectedDate);
         today.setHours(0,0,0,0);
         selDate.setHours(0,0,0,0);
@@ -758,7 +852,7 @@ function addItemToPlan(item) {
         }
     }
 
-    if (requiresStockCheck) {
+    if (requiresStockCheck && item.category !== 'drink') {
         const availableStock = currentViewMode === 'pre-order' ? item.prebook_pool : item.walkin_pool;
         if (availableStock <= 0) {
             alert(`❌ ${item.name} is out of stock!`);
@@ -910,15 +1004,38 @@ function openQuantityModal(item, requiresStockCheck) {
 }
 
 function openPortionModal(item) {
-    const modal = document.getElementById('portion-modal'); // Make sure this exists in your HTML!
+    let modal = document.getElementById('portion-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'portion-modal';
+        modal.className = 'modal-overlay';
+        modal.style.zIndex = '999999'; // Ensure it's on top
+        document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+        <div class="modal-content booking-card" style="max-width: 320px; text-align: center; background: #fff; color: #333;">
+            <h3 style="color: #222;">Select Portion for ${item.name}</h3>
+            <p style="margin-bottom: 20px; color: #666;">Choose between a half or full portion.</p>
+            <div class="btn-group" style="display: flex; gap: 10px; justify-content: center;">
+                <button type="button" id="portion-half-btn" class="btn-action" style="margin-top: 0; flex-grow: 1;">Half (₹${item.price_half})</button>
+                <button type="button" id="portion-full-btn" class="btn-confirm" style="margin-top: 0; flex-grow: 1;">Full (₹${item.price_full})</button>
+            </div>
+            <button type="button" id="portion-cancel-btn" class="btn-action" style="margin-top: 15px; background: #888; width: 100%;">Cancel</button>
+        </div>
+    `;
+    
     modal.style.display = 'flex';
     
-    document.getElementById('half-btn').onclick = () => {
+    document.getElementById('portion-half-btn').onclick = () => {
         addToCart(item, 1, 'Half', item.price_half);
         modal.style.display = 'none';
     };
-    document.getElementById('full-btn').onclick = () => {
+    document.getElementById('portion-full-btn').onclick = () => {
         addToCart(item, 1, 'Full', item.price_full);
+        modal.style.display = 'none';
+    };
+    document.getElementById('portion-cancel-btn').onclick = () => {
         modal.style.display = 'none';
     };
 }

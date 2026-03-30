@@ -1,6 +1,3 @@
-# Return the current logic status for lunch_1am and breakfast_7am
-def logic_status_for_today():
-    return logic_status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from . import models
@@ -8,11 +5,6 @@ from .time_logic import get_current_date
 
 # Track if 1am/7am logic has run for today
 import datetime
-logic_status = {
-    'lunch_1am': None,      # date when 1am lunch logic last ran
-    'breakfast_5pm': None,  # date when 5pm breakfast logic last ran
-    'breakfast_7am': None,  # date when 7am breakfast logic last ran
-}
 
 def process_1am_lunch_recalc(db: Session):
     """
@@ -25,40 +17,26 @@ def process_1am_lunch_recalc(db: Session):
     today = get_current_date()
     day_of_week = today.strftime('%A').lower()
 
-    # Mark logic as run for today
-    logic_status['lunch_1am'] = today
     # Mark logic as run for today in the database
-    logic_run = db.query(models.LogicRun).filter(models.LogicRun.logic_name == 'lunch_1am').first()
-    if logic_run:
-        logic_run.last_run_date = today
-    else:
-        db.add(models.LogicRun(logic_name='lunch_1am', last_run_date=today))
+    db.add(models.LogicRun(logic_name='lunch_1am', last_run_date=today))
 
     for item in lunch_items:
         # Get the stock record for today to update it
         stock = get_or_create_stock(db, item.id, day_of_week)
 
-        # Sum the exact quantity of confirmed pre-orders for today
-        total_qty = db.query(func.sum(models.BookedItem.quantity)).join(models.Booking).filter(
-            models.BookedItem.food_item_id == item.id,
-            models.Booking.booking_date == today,
-            models.Booking.status == 'confirmed'
-        ).scalar()
-        pre_order_count = total_qty if total_qty is not None else 0
-
+        # The base stock is now a live counter. We just read it.
+        pre_order_count = stock.admin_base_stock
         print(f"Item '{item.name}' (ID: {item.id}) has {pre_order_count} pre-orders.")
-
         # Calculate the 20% buffer based on pre-orders
         buffer = int(pre_order_count * 0.20)
         # Buffer split: 10% for late pre-book (1am-11am), 10% for walk-in
         prebook_buffer = buffer // 2
         walkin_buffer = buffer - prebook_buffer
 
-        # Update the day-specific stock record
+        # Update the buffer pools based on the live base stock count
         stock.prebook_pool = prebook_buffer
         stock.walkin_pool = walkin_buffer
-        stock.admin_base_stock = pre_order_count + buffer
-        print(f"Updated '{item.name}': Pre-book Buffer={stock.prebook_pool}, Walk-in Buffer={stock.walkin_pool}, Total={stock.admin_base_stock}")
+        print(f"Updated '{item.name}': Base={stock.admin_base_stock}, Pre-book Buffer={stock.prebook_pool}, Walk-in Buffer={stock.walkin_pool}")
 
     db.commit()
     print("1 AM lunch recalculation complete.")
@@ -83,15 +61,12 @@ def get_or_create_stock(db, food_item_id, day_of_week):
         db.refresh(stock)
     return stock
 
-def get_all_food_items(day=None):
+def get_all_food_items(db: Session, day=None):
     # Return all food items with their stock for the given day (default: today)
-    from .database import SessionLocal
     from .models import FoodItem, FoodStock
-    import datetime
-    db = SessionLocal()
     items = db.query(FoodItem).all()
     if not day:
-        day = datetime.datetime.now().strftime('%A').lower()
+        day = get_current_date().strftime('%A').lower()
     result = []
     for item in items:
         stock = db.query(FoodStock).filter_by(food_item_id=item.id, day_of_week=day).first()
@@ -104,7 +79,6 @@ def get_all_food_items(day=None):
         item_dict = item.as_dict() if hasattr(item, 'as_dict') else {c.name: getattr(item, c.name) for c in item.__table__.columns}
         item_dict.update(stock_dict)
         result.append(item_dict)
-    db.close()
     return result
 
 def process_5pm_breakfast_recalc(db: Session):
@@ -115,40 +89,26 @@ def process_5pm_breakfast_recalc(db: Session):
     """
     print("Executing 5 PM breakfast recalculation for tomorrow...")
     breakfast_items = db.query(models.FoodItem).filter(models.FoodItem.meal_type == 'breakfast').all()
-    import datetime
-    target_date = get_current_date() + datetime.timedelta(days=1)
+    today = get_current_date()
+    target_date = today + datetime.timedelta(days=1)
     day_of_week = target_date.strftime('%A').lower()
 
-    logic_status['breakfast_5pm'] = get_current_date()
-    # Mark logic as run for today in the database
-    logic_run = db.query(models.LogicRun).filter(models.LogicRun.logic_name == 'breakfast_5pm').first()
-    if logic_run:
-        logic_run.last_run_date = today
-    else:
-        db.add(models.LogicRun(logic_name='breakfast_5pm', last_run_date=today))
+    db.add(models.LogicRun(logic_name='breakfast_5pm', last_run_date=today))
 
     for item in breakfast_items:
         stock = get_or_create_stock(db, item.id, day_of_week)
 
-        # Sum the exact quantity of confirmed pre-orders for tomorrow
-        total_qty = db.query(func.sum(models.BookedItem.quantity)).join(models.Booking).filter(
-            models.BookedItem.food_item_id == item.id,
-            models.Booking.booking_date == target_date,
-            models.Booking.status == 'confirmed'
-        ).scalar()
-        pre_order_count = total_qty if total_qty is not None else 0
-
+        # The base stock is now a live counter. We just read it.
+        pre_order_count = stock.admin_base_stock
         print(f"Item '{item.name}' (ID: {item.id}) has {pre_order_count} pre-orders for tomorrow.")
 
         buffer = int(pre_order_count * 0.20)
-
         prebook_buffer = buffer // 2
         walkin_buffer = buffer - prebook_buffer
 
         stock.prebook_pool = prebook_buffer
         stock.walkin_pool = walkin_buffer
-        stock.admin_base_stock = pre_order_count + buffer
-        print(f"Updated '{item.name}': Pre-book Pool={stock.prebook_pool}, Walk-in Pool={stock.walkin_pool}, Total={stock.admin_base_stock}")
+        print(f"Updated '{item.name}': Base={stock.admin_base_stock}, Pre-book Pool={stock.prebook_pool}, Walk-in Pool={stock.walkin_pool}")
 
     db.commit()
     print("5 PM breakfast recalculation complete.")
@@ -163,14 +123,8 @@ def process_7am_breakfast_rollover(db: Session):
     today = get_current_date()
     day_of_week = today.strftime('%A').lower()
 
-    # Mark logic as run for today
-    logic_status['breakfast_7am'] = get_current_date()
     # Mark logic as run for today in the database
-    logic_run = db.query(models.LogicRun).filter(models.LogicRun.logic_name == 'breakfast_7am').first()
-    if logic_run:
-        logic_run.last_run_date = today
-    else:
-        db.add(models.LogicRun(logic_name='breakfast_7am', last_run_date=today))
+    db.add(models.LogicRun(logic_name='breakfast_7am', last_run_date=today))
 
     for item in breakfast_items:
         stock = get_or_create_stock(db, item.id, day_of_week)
@@ -193,6 +147,10 @@ def process_11am_lunch_rollover(db: Session):
     lunch_items = db.query(models.FoodItem).filter(models.FoodItem.meal_type == 'lunch').all()
     today = get_current_date()
     day_of_week = today.strftime('%A').lower()
+
+    # Mark logic as run for today
+    db.add(models.LogicRun(logic_name='lunch_11am', last_run_date=today))
+
     for item in lunch_items:
         stock = get_or_create_stock(db, item.id, day_of_week)
         print(f"Item '{item.name}' (ID: {item.id}): Moving {stock.prebook_pool} items from pre-book buffer to walk-in.")
@@ -202,3 +160,51 @@ def process_11am_lunch_rollover(db: Session):
 
     db.commit()
     print("11 AM lunch rollover complete.")
+
+
+# A data structure to define our time-based triggers in a clear, extensible way.
+# Format: (Hour to run after, Name in LogicRun table, Function to execute)
+TIME_TRIGGERS = [
+    (1, 'lunch_1am', process_1am_lunch_recalc),
+    (7, 'breakfast_7am', process_7am_breakfast_rollover),
+    (11, 'lunch_11am', process_11am_lunch_rollover),
+    (17, 'breakfast_5pm', process_5pm_breakfast_recalc),
+]
+
+def is_working_day(target_date: datetime.date, db: Session) -> bool:
+    """Check if a date is a working day (not a weekend and not a holiday)."""
+    if target_date.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        return False
+    holiday = db.query(models.Holiday).filter(models.Holiday.date == target_date).first()
+    if holiday:
+        return False
+    return True
+
+def evaluate_time_triggers(db: Session):
+    """
+    Evaluates the current mocked time and triggers any pending stock logic.
+    This function is designed to be idempotent and safe to call frequently.
+    """
+    from . import time_logic
+    now = time_logic.get_current_datetime()
+    today_date = now.date()
+    tomorrow_date = today_date + datetime.timedelta(days=1)
+    
+    today_working = is_working_day(today_date, db)
+    tomorrow_working = is_working_day(tomorrow_date, db)
+    
+    # Get the set of logic that has already run today from the database.
+    runs_today = {run.logic_name for run in db.query(models.LogicRun).filter(models.LogicRun.last_run_date == today_date).all()}
+
+    # Loop through our defined triggers
+    for hour, name, func in TIME_TRIGGERS:
+        # On non-working days, only allow the 5 PM breakfast recalc if tomorrow is a working day
+        if not today_working and (name != 'breakfast_5pm' or not tomorrow_working):
+            continue
+        # On working days, prevent the 5 PM breakfast recalc if tomorrow is NOT a working day
+        if today_working and name == 'breakfast_5pm' and not tomorrow_working:
+            continue
+            
+        if now.hour >= hour and name not in runs_today:
+            func(db)
+            runs_today.add(name) # Add to set to prevent re-running in this same call if time changes mid-function

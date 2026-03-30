@@ -77,6 +77,9 @@ async function saveFood() {
     const payload = {
         name: document.getElementById('food-name').value,
         price_full: parseInt(document.getElementById('food-price').value),
+        price_half: parseInt(document.getElementById('food-price-half')?.value || 0),
+        description: document.getElementById('food-description')?.value || '',
+        image_url: document.getElementById('food-image-url')?.value || '',
         category: document.getElementById('food-category').value,
         meal_type: document.getElementById('food-meal-type').value,
         has_portions: has_portions,
@@ -267,7 +270,8 @@ async function editUserEmail(admissionNo, currentEmail) {
 }
 
 // --- MENU CATALOG MANAGEMENT ---
-function openFoodModal(id = null, name = '', price = '', category = 'meal', meal_type = 'breakfast', has_portions = false, is_countable = false) {
+function openFoodModal(item = null) {
+    const data = item || { id: null, name: '', price_full: '', price_half: '', category: 'meal', meal_type: 'breakfast', has_portions: false, is_countable: false, description: '', image_url: '' };
     // Dynamically inject hidden ID field if missing
     let idField = document.getElementById('edit-food-item-id');
     if (!idField) {
@@ -296,18 +300,47 @@ function openFoodModal(id = null, name = '', price = '', category = 'meal', meal
         countableContainer.innerHTML = `<label style="display: flex; align-items: center;"><input type="checkbox" id="food-is-countable" style="width: auto; margin-right: 10px;"> Is Countable (e.g. Appam)</label>`;
         portionsContainer.after(countableContainer);
     }
+
+    let priceHalfContainer = document.getElementById('food-price-half-container');
+    if (!priceHalfContainer) {
+        const priceInput = document.getElementById('food-price');
+        if (priceInput) {
+            priceHalfContainer = document.createElement('div');
+            priceHalfContainer.id = 'food-price-half-container';
+            priceHalfContainer.className = 'form-group';
+            priceHalfContainer.innerHTML = `<label>Half Portion Price (₹)</label><input type="number" id="food-price-half" class="form-control" value="0">`;
+            priceInput.parentNode.after(priceHalfContainer);
+        }
+    }
+
+    let detailsContainer = document.getElementById('food-details-container');
+    if (!detailsContainer) {
+        const categoryInput = document.getElementById('food-category');
+        if (categoryInput) {
+            detailsContainer = document.createElement('div');
+            detailsContainer.id = 'food-details-container';
+            detailsContainer.innerHTML = `
+                <div class="form-group"><label>Image URL (Optional)</label><input type="text" id="food-image-url" class="form-control" placeholder="https://..."></div>
+                <div class="form-group"><label>Description (Optional)</label><textarea id="food-description" class="form-control" rows="2" placeholder="Short description..."></textarea></div>
+            `;
+            categoryInput.parentNode.before(detailsContainer);
+        }
+    }
     
     // Hide the old "base stock" input from the menu modal, as stock is now managed separately
     const stockInputGrp = document.getElementById('admin-stock-input')?.closest('.form-group');
     if (stockInputGrp) stockInputGrp.style.display = 'none';
 
-    idField.value = id || '';
-    document.getElementById('food-name').value = name;
-    document.getElementById('food-price').value = price;
-    document.getElementById('food-category').value = category;
-    document.getElementById('food-meal-type').value = meal_type;
-    document.getElementById('food-has-portions').checked = has_portions;
-    document.getElementById('food-is-countable').checked = is_countable;
+    idField.value = data.id || '';
+    document.getElementById('food-name').value = data.name || '';
+    document.getElementById('food-price').value = data.price_full || '';
+    if(document.getElementById('food-price-half')) document.getElementById('food-price-half').value = data.price_half || 0;
+    if(document.getElementById('food-image-url')) document.getElementById('food-image-url').value = data.image_url || '';
+    if(document.getElementById('food-description')) document.getElementById('food-description').value = data.description || '';
+    document.getElementById('food-category').value = data.category || 'meal';
+    document.getElementById('food-meal-type').value = data.meal_type || 'breakfast';
+    document.getElementById('food-has-portions').checked = data.has_portions || false;
+    document.getElementById('food-is-countable').checked = data.is_countable || false;
 
     openModal('menu-modal');
 }
@@ -327,12 +360,12 @@ async function loadFoodCatalog() {
             <h4>${item.name}</h4>
             <p class="item-category">${item.category} | ${item.meal_type}</p>
             <p class="item-category" style="font-weight: bold;">
-                Price: ₹${item.price_full} | 
+                Price: ₹${item.price_full} ${item.has_portions ? ` (Half: ₹${item.price_half || 0})` : ''} | 
                 Portions: ${item.has_portions ? 'Yes' : 'No'} |
                 Countable: ${item.is_countable ? 'Yes' : 'No'}
             </p>
             <div style="margin-top: 10px;">
-                <button class="btn-action" onclick="openFoodModal(${item.id}, '${item.name.replace(/'/g, "\\'")}', ${item.price_full}, '${item.category}', '${item.meal_type}', ${item.has_portions}, ${item.is_countable})">
+                <button class="btn-action" onclick='openFoodModal(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})'>
                     <i class="fas fa-edit"></i> Edit Details
                 </button>
                 <button class="btn-danger" onclick="deleteFood(${item.id})">
@@ -347,8 +380,7 @@ async function loadFoodCatalog() {
 
 // --- DAILY STOCK MANAGEMENT ---
 async function loadDailyStock() {
-    // Fallback to menu container if HTML hasn't been updated with a dedicated stock container yet
-    const container = document.getElementById('admin-stock-list') || document.getElementById('admin-menu-list');
+    const container = document.getElementById('admin-stock-list');
     if (!container) return;
     
     const dayInput = document.getElementById('admin-stock-day');
@@ -359,9 +391,6 @@ async function loadDailyStock() {
     try {
         const response = await fetch(`${API_BASE}/food-items${dayParam}`);
         const items = await response.json();
-
-        // Add lock base stock button (for 4pm)
-        let lockBtnHtml = `<button class="btn-action" style="margin-bottom:10px;" onclick="lockBreakfastBaseStock()">Lock Breakfast Base Stock (4pm)</button>`;
 
         const itemHtml = items.map(item => {
             return `
@@ -388,23 +417,8 @@ async function loadDailyStock() {
             </div>`;
         }).join('');
 
-        container.innerHTML = lockBtnHtml + itemHtml;
+        container.innerHTML = itemHtml;
     } catch (err) { console.error("Menu load failed", err); }
-}
-// Lock breakfast base stock at 4pm
-async function lockBreakfastBaseStock() {
-    if (!confirm('Lock base stock for all breakfast items for tomorrow?')) return;
-    try {
-        const response = await fetch(`${API_BASE}/admin/lock-breakfast-base-stock`, { method: 'POST' });
-        if (response.ok) {
-            alert('✅ Base stock locked for breakfast items for tomorrow.');
-            loadDailyStock();
-        } else {
-            alert('❌ Failed to lock base stock.');
-        }
-    } catch (err) {
-        alert('❌ Network error.');
-    }
 }
 
 // Set buffer for breakfast item for tomorrow
@@ -469,8 +483,13 @@ async function setMockTime() {
         });
 
         if (response.ok) {
-            document.getElementById('mock-time-display').innerText = time || 'Real Time';
             alert(`✅ System time set to ${time}`);
+            if (typeof syncTimeWithServer === 'function') {
+                await syncTimeWithServer(); // Force the clock to re-sync immediately
+            }
+            loadDailyStock();
+            loadDailyStock();
+            loadDailyStock();
         } else {
             alert('❌ Failed to set system time.');
         }
@@ -495,8 +514,10 @@ async function setMockDate() {
         });
 
         if (response.ok) {
-            document.getElementById('mock-date-display').innerText = date;
             alert(`✅ System date set to ${date}`);
+            if (typeof syncTimeWithServer === 'function') {
+                await syncTimeWithServer(); // Force the clock to re-sync immediately
+            }
         } else {
             alert('❌ Failed to set system date.');
         }
@@ -506,9 +527,64 @@ async function setMockDate() {
     }
 }
 
+async function setMockDateTime() {
+    const date = document.getElementById('test-date').value;
+    const time = document.getElementById('test-time').value;
+    
+    if (!date && !time) {
+        alert('Please select a date or time');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/admin/set-datetime`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: date, time: time })
+        });
+
+        if (response.ok) {
+            alert(`✅ System clock updated`);
+            if (typeof syncTimeWithServer === 'function') {
+                await syncTimeWithServer(); // Force the clock to re-sync immediately
+            }
+            loadDailyStock();
+            loadAllOrders();
+        } else {
+            alert('❌ Failed to update system clock.');
+        }
+    } catch (error) {
+        console.error('Error updating mock clock:', error);
+        alert('❌ An error occurred.');
+    }
+}
+
+async function resetMockTime() {
+    if (!confirm("Are you sure you want to reset the system clock to real time?")) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/admin/reset-time`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            alert('✅ System time has been reset.');
+            if (typeof syncTimeWithServer === 'function') {
+                await syncTimeWithServer(); // Force the clock to re-sync immediately
+            }
+        } else {
+            alert('❌ Failed to reset system time.');
+        }
+    } catch (error) {
+        console.error('Error resetting mock time:', error);
+        alert('❌ An error occurred while resetting the time.');
+    }
+}
+
 async function seedFakeOrders() {
     const date = document.getElementById('seed-date').value;
-    const meal_type = document.getElementById('seed-meal-type').value;
 
     if (!date) {
         alert("Please select a date to seed orders.");
@@ -519,7 +595,7 @@ async function seedFakeOrders() {
         const response = await fetch(`${API_BASE}/admin/seed-orders`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ date, meal_type })
+            body: JSON.stringify({ date })
         });
 
         const data = await response.json();
@@ -535,15 +611,49 @@ async function seedFakeOrders() {
     }
 }
 
+async function clearFakeOrders() {
+    const date = document.getElementById('seed-date').value;
+
+    if (!date) {
+        alert("Please select a date first.");
+        return;
+    }
+
+    if (!confirm(`⚠️ ARE YOU SURE?\n\nThis will delete ALL orders for ${date} and reset the stock pools to 0. This cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/admin/clear-orders`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date })
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+            alert(`✅ ${data.message}`);
+            loadAllOrders(); // Refresh orders grid
+            loadDailyStock(); // Refresh stock table
+        } else {
+            alert(`❌ Error: ${data.detail}`);
+        }
+    } catch (error) {
+        console.error("Error clearing orders:", error);
+        alert("❌ Network error.");
+    }
+}
+
 //walk in edit
 async function updateWalkinStock(foodId, newAmount) {
+    const day = document.getElementById('admin-stock-day').value;
+    if (!day) return alert("Please select a day first.");
     // Allows admin to manually sync physical sales to the app
-    await fetch(`${API_BASE}/food-items/${foodId}/stock`, {
+    await fetch(`${API_BASE}/api/stock/${day}/${foodId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ walkin_pool: newAmount })
     });
-    loadDailyStock();
 }
 
 //stock edit
@@ -559,20 +669,17 @@ function openEditStockModal(id, meal_type, base, prebook, walkin) {
 
 async function saveStockEdit() {
     const foodId = document.getElementById('edit-food-id').value;
-    const day = document.getElementById('admin-stock-day').value;
-    const admin_base_stock = parseInt(document.getElementById('edit-base-stock').value) || 0;
-    const prebook_pool = parseInt(document.getElementById('edit-prebook-pool').value) || 0;
-    const walkin_pool = parseInt(document.getElementById('edit-walkin-pool').value) || 0;
+    const day = document.getElementById('admin-stock-day').value; // e.g., 'monday'
+    if (!day) return alert("Please select a day from the dropdown.");
+
     const payload = {
-        day: day,
-        admin_base_stock: admin_base_stock,
-        prebook_pool: prebook_pool,
-        walkin_pool: walkin_pool,
-        breakfast_buffer: 0
+        admin_base_stock: parseInt(document.getElementById('edit-base-stock').value),
+        prebook_pool: parseInt(document.getElementById('edit-prebook-pool').value),
+        walkin_pool: parseInt(document.getElementById('edit-walkin-pool').value)
     };
     try {
-        const response = await fetch(`${API_BASE}/food-items/${foodId}/stock`, {
-            method: 'POST',
+        const response = await fetch(`${API_BASE}/api/stock/${day}/${foodId}`, {
+            method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });

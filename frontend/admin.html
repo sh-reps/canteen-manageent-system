@@ -41,7 +41,6 @@
             <button class="logout-btn" onclick="localStorage.clear(); location.href='/'">
                 <i class="fas fa-sign-out-alt"></i> Logout
             </button>
-    <script src="./js/clock.js"></script>
         </div>
     </nav>
 
@@ -132,14 +131,16 @@
                     <h3>Mock System Time</h3>
                     <p>Current Time: <span id="mock-time-display" style="font-weight: bold; color: #ff6b6b;">Real Time</span></p>
                     <div class="form-group">
-                        <input type="time" id="test-time" placeholder="Set time (HH:MM)">
-                        <button onclick="setMockTime()" class="btn-confirm">Set System Time</button>
+                        <input type="time" id="test-time" step="1" placeholder="Set time (HH:MM:SS)">
                     </div>
                     <hr>
                     <p>Current Date: <span id="mock-date-display" style="font-weight: bold; color: #4e8cff;">Real Date</span></p>
                     <div class="form-group">
                         <input type="date" id="test-date">
-                        <button onclick="setMockDate()" class="btn-confirm">Set System Date</button>
+                    </div>
+                    <div class="form-group" style="margin-top: 20px;">
+                        <button onclick="setMockDateTime()" class="btn-confirm" style="width: 100%; margin-bottom: 10px;">Apply Date & Time</button>
+                        <button onclick="resetMockTime()" class="btn-danger" style="width: 100%;">Reset to Real Time</button>
                     </div>
                 </div>
                 <div class="clock-card">
@@ -154,17 +155,12 @@
                 </div>
                 <div class="clock-card">
                     <h3>Seed Fake Orders</h3>
-                    <p>Generate up to 50 random pre-book orders for testing.</p>
+                    <p>Generate 200 random mixed (breakfast & lunch) orders for testing.</p>
                     <div class="form-group">
                         <input type="date" id="seed-date">
                     </div>
-                    <div class="form-group">
-                        <select id="seed-meal-type">
-                            <option value="breakfast">Breakfast (Sit-in)</option>
-                            <option value="lunch">Lunch (Parcel)</option>
-                        </select>
-                    </div>
                     <button onclick="seedFakeOrders()" class="btn-confirm">Generate Orders</button>
+                    <button class="btn-danger" onclick="clearFakeOrders()">Clear All Orders</button>
                 </div>
             </div>
         </section>
@@ -212,6 +208,7 @@
     <div id="menu-modal" class="modal-overlay" style="display:none;">
         <div class="modal-content booking-card">
             <h3>New Menu Item</h3>
+            <input type="hidden" id="edit-food-item-id">
             <div class="form-group">
                 <input type="text" id="food-name" placeholder="Item Name (e.g., Chicken Biriyani)">
                 <input type="number" id="food-price" placeholder="Price (Full)">
