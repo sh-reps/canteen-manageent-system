@@ -73,6 +73,20 @@ window.showFoodInfo = function(item) {
     tomorrow.setDate(today.getDate() + 1);
     const isTomorrow = selDate.getTime() === tomorrow.getTime();
 
+    let isOver = false;
+    let overMessage = "";
+    if (isToday) {
+        const currentHour = today.getHours();
+        const currentMins = today.getMinutes();
+        if (currentMealType === 'breakfast' && (currentHour > 9 || (currentHour === 9 && currentMins >= 30))) {
+            isOver = true;
+            overMessage = "Breakfast service has ended for today.";
+        } else if (currentMealType === 'lunch' && currentHour >= 14) {
+            isOver = true;
+            overMessage = "Lunch service has ended for today.";
+        }
+    }
+
     let showStock = false;
     let stockCount = 0;
     let stockPoolName = '';
@@ -107,7 +121,14 @@ window.showFoodInfo = function(item) {
     }
 
     // Bypassing stock display for drinks entirely
-    if (showStock && item.category !== 'drink') {
+    if (isOver && isToday) {
+        stockHtml = `
+            <div style="background: #ffeaea; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 0.9rem; border: 1px solid #ffb3b3; text-align: left;">
+                <strong style="color: #d9534f; display: block; margin-bottom: 5px;">Service Ended</strong>
+                <span style="color: #333;">${overMessage}</span>
+            </div>
+        `;
+    } else if (showStock && item.category !== 'drink') {
         // Only show stock info if there was an initial base stock (pre-orders),
         // or if there is currently stock in the pool. This prevents showing "Sold Out"
         // for items that had zero pre-orders and thus a zero-sized buffer.
@@ -821,7 +842,7 @@ function renderMenu() {
                             <span class="item-name">${item.name} <button onclick='showFoodInfo(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})' style="background:none; border:none; cursor:pointer; color:#3498db; padding: 0; margin-right: 5px;" title="View Info">ℹ️</button>(₹${item.price_full})</span>
                             <span class="item-meta">${item.category}</span>
                         </div>
-                        <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item)})' ${isItemDisabled ? 'disabled' : ''}>+</button>
+                        <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})' ${isItemDisabled ? 'style="background-color: #ccc; cursor: not-allowed;"' : ''}>+</button>
                     `;
                     modalContainer.appendChild(row);
                 });

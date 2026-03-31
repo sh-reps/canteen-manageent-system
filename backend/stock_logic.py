@@ -57,7 +57,7 @@ def get_or_create_stock(db, food_item_id, day_of_week):
             breakfast_buffer=item_template.breakfast_buffer if item_template else 0
         )
         db.add(stock)
-        db.commit() # Commit immediately to avoid race conditions
+        db.flush() # Flush to get an ID, but don't commit the transaction.
         db.refresh(stock)
     return stock
 
@@ -161,13 +161,74 @@ def process_11am_lunch_rollover(db: Session):
     db.commit()
     print("11 AM lunch rollover complete.")
 
+def process_10am_breakfast_clear(db: Session):
+    """Clears all unsold breakfast stock at the end of the breakfast period."""
+    print("Executing 10 AM breakfast stock clear...")
+    breakfast_items = db.query(models.FoodItem).filter(models.FoodItem.meal_type == 'breakfast').all()
+    today = get_current_date()
+    day_of_week = today.strftime('%A').lower()
+
+    for item in breakfast_items:
+        stock = get_or_create_stock(db, item.id, day_of_week)
+        stock.walkin_pool = 0
+        stock.prebook_pool = 0
+    db.commit()
+
+def process_2pm_lunch_clear(db: Session):
+    """Clears all unsold lunch stock at the end of the lunch period."""
+    print("Executing 2 PM lunch stock clear...")
+    lunch_items = db.query(models.FoodItem).filter(models.FoodItem.meal_type == 'lunch').all()
+    today = get_current_date()
+    day_of_week = today.strftime('%A').lower()
+
+    for item in lunch_items:
+        stock = get_or_create_stock(db, item.id, day_of_week)
+        stock.walkin_pool = 0
+        stock.prebook_pool = 0
+    db.commit()
+
+def process_expired_orders(db: Session, now: datetime.datetime):
+    """Finds confirmed orders that missed their 30-min window and moves items to walk-in."""
+    today = now.date()
+    
+    # Get all confirmed bookings for today
+    bookings = db.query(models.Booking).filter(
+        models.Booking.booking_date == today,
+        models.Booking.status == 'confirmed'
+    ).all()
+    
+    for booking in bookings:
+        if not booking.scheduled_slot:
+            continue
+        try:
+            # Parse slot time, add 30 minute grace period
+            time_str = booking.scheduled_slot[:5] # Extract HH:MM safely
+            slot_time = datetime.datetime.strptime(time_str, "%H:%M").time()
+            expiry_dt = datetime.datetime.combine(today, slot_time) + datetime.timedelta(minutes=30)
+            
+            if now >= expiry_dt:
+                print(f"🕒 Booking {booking.id} expired! Moving items to walk-in.")
+                booking.status = 'no-show'
+                day_of_week = today.strftime('%A').lower()
+                
+                for booked_item in booking.items:
+                    stock = get_or_create_stock(db, booked_item.food_item_id, day_of_week)
+                    stock.walkin_pool += booked_item.quantity
+                    
+                for seat_reservation in booking.booked_seats:
+                    db.delete(seat_reservation)
+        except Exception as e:
+            print(f"[ERROR] Failed to process expiry for booking {booking.id}: {e}")
+    db.commit()
 
 # A data structure to define our time-based triggers in a clear, extensible way.
 # Format: (Hour to run after, Name in LogicRun table, Function to execute)
 TIME_TRIGGERS = [
     (1, 'lunch_1am', process_1am_lunch_recalc),
     (7, 'breakfast_7am', process_7am_breakfast_rollover),
+    (10, 'breakfast_10am_clear', process_10am_breakfast_clear),
     (11, 'lunch_11am', process_11am_lunch_rollover),
+    (14, 'lunch_2pm_clear', process_2pm_lunch_clear),
     (17, 'breakfast_5pm', process_5pm_breakfast_recalc),
 ]
 
@@ -193,6 +254,10 @@ def evaluate_time_triggers(db: Session):
     today_working = is_working_day(today_date, db)
     tomorrow_working = is_working_day(tomorrow_date, db)
     
+    # Continuously evaluate expirations for today's orders (No-shows)
+    if today_working:
+        process_expired_orders(db, now)
+
     # Get the set of logic that has already run today from the database.
     runs_today = {run.logic_name for run in db.query(models.LogicRun).filter(models.LogicRun.last_run_date == today_date).all()}
 

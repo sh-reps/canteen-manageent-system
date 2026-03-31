@@ -1,5 +1,5 @@
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, Time, ForeignKey, Date, Text
-from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Time, ForeignKey, Date, Text, UniqueConstraint
+from sqlalchemy.orm import relationship, declarative_base
 from .database import Base, engine
 from . import time_logic
 
@@ -90,6 +90,10 @@ class SeatReservation(Base):
     reservation_date = Column(Date)
     booking = relationship("Booking", back_populates="booked_seats")
     seat = relationship("Seat")
+
+    __table_args__ = (
+        UniqueConstraint('seat_id', 'time_slot', 'reservation_date', name='_seat_slot_date_uc'),
+    )
 
 class Holiday(Base):
     __tablename__ = "holidays"

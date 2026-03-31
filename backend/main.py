@@ -64,11 +64,14 @@ def get_stock_logic_status(db: Session = Depends(get_db)):
     }
 
 # Create the database tables if they don't exist
+print("[INFO] Verifying database tables...")
 models.Base.metadata.create_all(bind=engine)
+print("[INFO] Database tables verified.")
 
 # Auto-apply missing columns to Supabase so you don't have to run terminal commands manually
 from sqlalchemy import text
 try:
+    print("[INFO] Applying schema updates...")
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE food_items ADD COLUMN IF NOT EXISTS is_countable BOOLEAN DEFAULT FALSE;"))
         conn.execute(text("ALTER TABLE booked_items ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;"))
@@ -79,11 +82,13 @@ try:
         conn.execute(text("ALTER TABLE food_items ADD COLUMN IF NOT EXISTS price_half INTEGER DEFAULT 0;"))
         # Forcefully drop the old unique constraint to stop the 500 errors
         conn.execute(text("ALTER TABLE logic_runs DROP CONSTRAINT IF EXISTS logic_runs_logic_name_key;"))
+    print("[INFO] Schema updates applied.")
 except Exception as e:
     print(f"[DEBUG] Schema auto-update error: {e}")
 
 # --- Self-healing: Ensure staff seats exist ---
 try:
+    print("[INFO] Checking for staff seats...")
     db = database.SessionLocal()
     staff_seat_count = db.query(models.Seat).filter(models.Seat.section == 'staff').count()
     if staff_seat_count == 0:
@@ -95,6 +100,8 @@ try:
             db.add(models.Seat(table_number=table_num, seat_number=seat_num, section='staff'))
         db.commit()
         print("✅ SUCCESS: Staff seats created automatically.")
+    else:
+        print("[INFO] Staff seats already exist.")
 finally:
     db.close()
 
@@ -338,12 +345,19 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
                     deplete_stock = True
 
                 if deplete_stock:
-                    # Note: We use stock_for_booking_day here as it's a same-day booking
-                    if stock_for_booking_day.prebook_pool >= cart_item.quantity:
-                        stock_for_booking_day.prebook_pool -= cart_item.quantity
-                    else:
-                        raise HTTPException(status_code=400, detail=f"Not enough pre-book stock for {food_item.name}. Available: {stock_for_booking_day.prebook_pool}, Requested: {cart_item.quantity}.")
+                    # Atomically update the stock to prevent race conditions.
+                    # This performs the check and subtraction in a single database operation.
+                    result = db.query(models.FoodStock).filter(
+                        models.FoodStock.id == stock_for_booking_day.id,
+                        models.FoodStock.prebook_pool >= cart_item.quantity
+                    ).update({
+                        'prebook_pool': models.FoodStock.prebook_pool - cart_item.quantity
+                    }, synchronize_session=False)
 
+                    # The 'result' is the number of rows updated. If it's 0, the WHERE clause failed.
+                    if result == 0:
+                        raise Exception(f"Sorry, {food_item.name} was just booked by someone else. Not enough stock.")
+                        
         # 6. Handle Seat Reservations
         if booking_data.order_type == "sit-in":
             if not booking_data.seat_ids:
@@ -355,7 +369,7 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
                     models.SeatReservation.reservation_date == booking_date
                 ).first()
                 if already_taken:
-                    raise Exception(f"Seat {s_id} was just taken. Please pick another.")
+                    raise Exception(f"Seat {s_id} was just taken while you were booking. Please pick another.")
                 res = models.SeatReservation(
                     seat_id=s_id,
                     booking_id=new_booking.id,
@@ -372,8 +386,11 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
 
     except Exception as e:
         db.rollback()
-        print(f"❌ DATABASE ERROR: {str(e)}") 
-        raise HTTPException(status_code=400, detail=str(e))
+        print(f"❌ TRANSACTION FAILED: {str(e)}")
+        # Provide a more user-friendly error for concurrency issues
+        if "was just taken" in str(e) or "was just booked" in str(e):
+            raise HTTPException(status_code=409, detail=str(e)) # 409 Conflict
+        raise HTTPException(status_code=400, detail=f"Booking failed: {str(e)}")
 
 # ==========================================
 # 3. AUTHENTICATION PLACEHOLDERS
@@ -605,11 +622,11 @@ def cancel_order(booking_id: int, db: Session = Depends(get_db)):
     booking.status = "cancelled"
     db.commit()
 
-    msg = "Order cancelled successfully! "
+    msg = "Order cancelled successfully!\n\n"
     if refund_eligible:
-        msg += "Refund will be processed. Items returned to pre-book pool."
+        msg += "✅ REFUND ISSUED: You cancelled before the kitchen cutoff time. Your items were returned to the pre-book pool."
     else:
-        msg += "No refund (cancelled after cutoff). Items moved to walk-in pool."
+        msg += "❌ NO REFUND: You cancelled after the kitchen cutoff time. Your items have been sent to the walk-in counter to avoid waste."
     return {"status": "success", "message": msg}
 
 #==========================================
