@@ -1,4 +1,39 @@
 var API_BASE = "http://127.0.0.1:8000";
+const DEBUG_NAV_PREF_KEY = 'admin_debug_nav_enabled';
+
+function isDebugNavEnabled() {
+    return localStorage.getItem(DEBUG_NAV_PREF_KEY) !== '0';
+}
+
+function setDebugToggleButtonState(enabled) {
+    const toggleBtn = document.getElementById('debug-toggle-btn');
+    if (!toggleBtn) return;
+
+    toggleBtn.textContent = enabled ? 'Debug: On' : 'Debug: Off';
+    toggleBtn.classList.toggle('off', !enabled);
+    toggleBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+}
+
+function applyDebugNavVisibility() {
+    const enabled = isDebugNavEnabled();
+    const debugNav = document.getElementById('nav-clock');
+
+    if (debugNav && !enabled && debugNav.classList.contains('active')) {
+        showSection('orders');
+    }
+
+    if (debugNav) {
+        debugNav.style.display = enabled ? '' : 'none';
+    }
+
+    setDebugToggleButtonState(enabled);
+}
+
+function toggleDebugNav() {
+    const nextEnabled = !isDebugNavEnabled();
+    localStorage.setItem(DEBUG_NAV_PREF_KEY, nextEnabled ? '1' : '0');
+    applyDebugNavVisibility();
+}
 
 
 async function deleteUser(admissionNo) {
@@ -135,6 +170,10 @@ async function saveFood() {
 // Move this OUTSIDE any listeners so the HTML can "see" it
 function showSection(sectionId) {
     console.log("Switching to section:", sectionId);
+
+    if (sectionId === 'clock' && !isDebugNavEnabled()) {
+        return;
+    }
     
     // 1. Hide all sections
     document.querySelectorAll('.admin-section').forEach(s => s.style.display = 'none');
@@ -165,6 +204,8 @@ function showSection(sectionId) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    applyDebugNavVisibility();
+
     // Initial call once the script loads
     showSection('orders'); 
 
@@ -927,10 +968,10 @@ function displayExpenses(expenses) {
     let html = '';
     expenses.forEach(expense => {
         html += `
-            <div style="padding: 10px; background: #f8f9fa; border-radius: 4px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="padding: 10px; background: #15212a; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; color: #dce6ec;">
                 <div>
                     <strong>${expense.expense_date}</strong> - ₹${expense.amount}
-                    ${expense.description ? `<br><small style="color: #666;">${expense.description}</small>` : ''}
+                    ${expense.description ? `<br><small style="color: #9eb2be;">${expense.description}</small>` : ''}
                 </div>
                 <button class="btn-danger" onclick="deleteExpense('${expense.expense_date}')" style="padding: 4px 8px; font-size: 0.8rem;">Delete</button>
             </div>

@@ -6,15 +6,16 @@
     <title>Canteen Login</title>
     <link rel="stylesheet" href="/css/styles.css">
 </head>
-<body>
+<body class="auth-page">
     
-        <div class="login-container">
+        <div class="login-container auth-card">
                 <h2>Canteen Management System</h2>
+            <p class="auth-helper">Sign in to manage your bookings, orders, and canteen activity.</p>
                 <input type="text" id="admission_no" placeholder="Admission Number (e.g. 2024CS101)">
                 <input type="password" id="password" placeholder="Password">
                 <button onclick="login()">Login</button>
-                <p id="error-message" style="color: red;"></p>
-                <a href="/forgot-password" style="display: block; margin-top: 15px; color: #2ecc71; text-decoration: none; font-size: 0.9em; text-align: center;">Forgot Password?</a>
+            <p id="error-message" class="auth-message auth-error"></p>
+            <a href="/forgot-password" class="auth-link">Forgot Password?</a>
         </div>
         <script src="/js/login.js"></script>
         

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Canteen Admin - Dashboard</title>
-    <link rel="stylesheet" href="./css/styles.css">
+    <link rel="stylesheet" href="/css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -45,6 +45,9 @@
             </li>
         </ul>
         <div class="sidebar-footer">
+            <button id="debug-toggle-btn" class="debug-toggle-btn" onclick="toggleDebugNav()" type="button" aria-pressed="true">
+                Debug: On
+            </button>
             <button class="logout-btn" onclick="localStorage.clear(); location.href='/'">
                 <i class="fas fa-sign-out-alt"></i> Logout
             </button>
@@ -56,7 +59,7 @@
         <section id="section-orders" class="admin-section">
             <div class="section-header">
                 <h2>Order Management (Day-wise)</h2>
-                <input type="date" id="admin-orders-date" style="margin-right:10px;">
+                <input type="date" id="admin-orders-date" class="section-control">
                 <button class="btn-action" onclick="loadAllOrders()">
                     <i class="fas fa-sync"></i> Refresh
                 </button>
@@ -113,7 +116,7 @@
         <section id="section-stock" class="admin-section" style="display:none;">
             <div class="section-header">
                 <h2>Daily Stock Allocation</h2>
-                <select id="admin-stock-day" style="margin-right:10px;" onchange="loadDailyStock()">
+                <select id="admin-stock-day" class="section-control" onchange="loadDailyStock()">
                     <option value="monday">Monday</option>
                     <option value="tuesday">Tuesday</option>
                     <option value="wednesday">Wednesday</option>
@@ -200,12 +203,12 @@
             <div class="profits-container">
                 <div class="booking-card" style="grid-column: 1; margin-bottom: 20px;">
                     <h3>Weekly Profit</h3>
-                    <div id="profit-summary" style="margin-bottom: 15px;">
-                        <div style="padding: 12px; background: #f8f9fa; border-radius: 6px; margin-bottom: 10px;">
-                            <p style="margin: 5px 0;"><strong>Week:</strong> <span id="week-range"></span></p>
-                            <p style="margin: 5px 0;"><strong>Total Revenue:</strong> ₹<span id="total-revenue">0</span></p>
-                            <p style="margin: 5px 0;"><strong>Total Expenses:</strong> ₹<span id="total-expenses">0</span></p>
-                            <p style="margin: 5px 0;"><strong style="color: #2ecc71;">Net Profit:</strong> ₹<span id="net-profit">0</span></p>
+                    <div id="profit-summary" class="profit-summary-block">
+                        <div class="profit-summary-panel">
+                            <p class="profit-metric"><strong>Week:</strong> <span id="week-range"></span></p>
+                            <p class="profit-metric"><strong>Total Revenue:</strong> ₹<span id="total-revenue">0</span></p>
+                            <p class="profit-metric"><strong>Total Expenses:</strong> ₹<span id="total-expenses">0</span></p>
+                            <p class="profit-metric net"><strong>Net Profit:</strong> ₹<span id="net-profit">0</span></p>
                         </div>
                     </div>
 
@@ -221,7 +224,7 @@
                     </div>
 
                     <h4 style="margin-top: 20px;">Daily Expenses This Week</h4>
-                    <div id="expenses-list" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; padding: 10px;">
+                    <div id="expenses-list" class="expenses-list">
                     </div>
                 </div>
 

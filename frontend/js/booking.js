@@ -147,18 +147,18 @@ window.showFoodInfo = function(item) {
     const imgHtml = item.image_url ? `<img src="${item.image_url}" alt="${item.name}" style="width: 100%; border-radius: 8px; margin-bottom: 15px; max-height: 180px; object-fit: cover; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">` : '';
     
     modal.innerHTML = `
-        <div class="modal-content booking-card" style="max-width: 450px; max-height: 85vh; overflow-y: auto; text-align: center; background: #fff; color: #333; position: relative; padding: 25px;">
-            <button class="close-x" onclick="document.getElementById('food-info-modal').style.display='none'" style="position: absolute; top: 10px; right: 15px; font-size: 1.5rem; background: transparent; border: none; cursor: pointer; color: #333;">&times;</button>
+        <div class="modal-content booking-card" style="max-width: 450px; max-height: 85vh; overflow-y: auto; text-align: center; background: #111a22; color: #deeaef; position: relative; padding: 25px; border: 1px solid rgba(255,255,255,0.12);">
+            <button class="close-x" onclick="document.getElementById('food-info-modal').style.display='none'" style="position: absolute; top: 10px; right: 15px; font-size: 1.5rem; background: transparent; border: none; cursor: pointer; color: #deeaef;">&times;</button>
             ${imgHtml}
-            <h3 style="color: #222; margin-bottom: 10px; font-size: 1.4rem;">${item.name}</h3>
-            <p style="margin-bottom: 15px; font-size: 0.95rem; color: #555; line-height: 1.4;">${item.description || 'No description available for this item.'}</p>
+            <h3 style="color: #f0f6f9; margin-bottom: 10px; font-size: 1.4rem;">${item.name}</h3>
+            <p style="margin-bottom: 15px; font-size: 0.95rem; color: #aec0cb; line-height: 1.4;">${item.description || 'No description available for this item.'}</p>
             ${stockHtml}
-            <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 1.1rem; border: 1px solid #eee;">
+            <div style="background: #15212a; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 1.1rem; border: 1px solid rgba(255,255,255,0.12); color:#e2edf2;">
                 ${priceHtml}
             </div>
             
             <!-- Reviews Section -->
-            <div id="reviews-section-${item.id}" style="margin-top: 20px; border-top: 2px solid #eee; padding-top: 15px; text-align: left;">
+            <div id="reviews-section-${item.id}" style="margin-top: 20px; border-top: 2px solid rgba(255,255,255,0.14); padding-top: 15px; text-align: left;">
                 <div id="reviews-loading-${item.id}" style="text-align: center; color: #999;">Loading reviews...</div>
             </div>
             
@@ -206,14 +206,14 @@ async function loadFoodReviews(foodId) {
         // Review submission form
         if (admission_no) {
             reviewsHtml += `
-                <div style="background: #f5f5f5; padding: 12px; border-radius: 6px; margin-bottom: 15px;">
-                    <h5 style="margin: 0 0 10px 0; color: #222; font-size: 0.95rem;">Your Review</h5>
+                <div style="background: #15212a; padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1);">
+                    <h5 style="margin: 0 0 10px 0; color: #e7eff4; font-size: 0.95rem;">Your Review</h5>
                     <div style="display: flex; gap: 5px; margin-bottom: 10px; justify-content: center;">
                         ${[1,2,3,4,5].map(i => `
                             <button class="star-btn" data-rating="${i}" onclick="setRating(${foodId}, ${i})" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; opacity: 0.5; transition: opacity 0.2s;">☆</button>
                         `).join('')}
                     </div>
-                    <textarea id="review-text-${foodId}" placeholder="Share your thoughts..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem; resize: vertical; min-height: 60px;"></textarea>
+                    <textarea id="review-text-${foodId}" placeholder="Share your thoughts..." style="width: 100%; padding: 8px; border: 1px solid rgba(255,255,255,0.16); border-radius: 4px; font-size: 0.9rem; resize: vertical; min-height: 60px; background:#0f171d; color:#deeaef;"></textarea>
                     <button onclick="submitReview(${foodId})" style="width: 100%; margin-top: 8px; padding: 8px; background: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Submit Review</button>
                 </div>
             `;
@@ -230,13 +230,13 @@ async function loadFoodReviews(foodId) {
                 
                 const canDelete = admission_no === review.user_id || userRole === 'admin';
                 reviewsHtml += `
-                    <div style="background: #fff; padding: 12px; border: 1px solid #eee; border-radius: 4px; margin-bottom: 8px; text-align: left;">
+                    <div style="background: #132029; padding: 12px; border: 1px solid rgba(255,255,255,0.12); border-radius: 4px; margin-bottom: 8px; text-align: left;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                            <strong style="color: #222;">${review.user_id}</strong>
+                            <strong style="color: #e6eff4;">${review.user_id}</strong>
                             <span style="font-size: 0.8rem; color: #999;">${new Date(review.created_at).toLocaleDateString()}</span>
                         </div>
                         <div style="color: #f39c12; font-size: 0.9rem; margin-bottom: 5px;">${stars} ${review.rating}/5</div>
-                        ${review.review_text ? `<p style="margin: 5px 0; font-size: 0.9rem; color: #555;">${review.review_text}</p>` : ''}
+                        ${review.review_text ? `<p style="margin: 5px 0; font-size: 0.9rem; color: #b8c7d0;">${review.review_text}</p>` : ''}
                         ${canDelete ? `<button onclick="deleteReview(${review.id}, ${foodId})" style="font-size: 0.8rem; padding: 4px 8px; background: #e74c3c; color: white; border: none; border-radius: 3px; cursor: pointer;">Delete</button>` : ''}
                     </div>
                 `;
@@ -548,15 +548,15 @@ function addMealTypePicker() {
     if (!mealTypeSection) {
         mealTypeSection = document.createElement('div');
         mealTypeSection.id = 'modal-mealtype-section';
-        mealTypeSection.style.cssText = "background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #eee; display: block !important;";
+        mealTypeSection.style.cssText = "background: #142028; padding: 15px; border-radius: 12px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.12); display: block !important;";
         mealTypeSection.innerHTML = `
-            <h4 style=\"margin: 0 0 15px 0; color: #333; font-size: 0.85rem; text-transform: uppercase; border-bottom: 1px solid #eee; padding-bottom: 8px;\">
+            <h4 style=\"margin: 0 0 15px 0; color: #e5edf2; font-size: 0.85rem; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.14); padding-bottom: 8px;\">
                 <span style=\"background: #2ecc71; color: white; padding: 2px 8px; border-radius: 4px; margin-right: 10px;\">Step 2</span> 
                 Select Meal Type
             </h4>
             <div id=\"meal-type-radio-group\" style=\"display: flex; gap: 16px;\">
-                <label style=\"color:#333; font-weight: 500; cursor: pointer;\"><input type=\"radio\" name=\"modal-mealtype\" value=\"breakfast\" checked> Breakfast</label>
-                <label style=\"color:#333; font-weight: 500; cursor: pointer;\"><input type=\"radio\" name=\"modal-mealtype\" value=\"lunch\"> Lunch</label>
+                <label style=\"color:#d8e4ea; font-weight: 500; cursor: pointer;\"><input type=\"radio\" name=\"modal-mealtype\" value=\"breakfast\" checked> Breakfast</label>
+                <label style=\"color:#d8e4ea; font-weight: 500; cursor: pointer;\"><input type=\"radio\" name=\"modal-mealtype\" value=\"lunch\"> Lunch</label>
             </div>
         `;
         // Insert after date section
@@ -1114,12 +1114,12 @@ function openQuantityModal(item, requiresStockCheck) {
 
     // Always inject fresh HTML to guarantee structure and wipe old event listeners
     modal.innerHTML = `
-        <div class="modal-content booking-card" style="max-width: 320px; text-align: center; background: #fff; color: #333;">
-            <h3 id="qty-item-name" style="color: #222;">${item.name}</h3>
-            <p style="margin-bottom: 15px; color: #666;">Select quantity (Min: ${minAllowed}, Max: ${maxAllowed})</p>
+        <div class="modal-content booking-card" style="max-width: 320px; text-align: center; background: #111a22; color: #dce7ed; border: 1px solid rgba(255,255,255,0.12);">
+            <h3 id="qty-item-name" style="color: #eef5f8;">${item.name}</h3>
+            <p style="margin-bottom: 15px; color: #9fb3bf;">Select quantity (Min: ${minAllowed}, Max: ${maxAllowed})</p>
             <div style="display: flex; justify-content: center; align-items: center; gap: 20px; margin-bottom: 20px;">
                 <button type="button" id="qty-minus" class="btn-action" style="padding: 10px; font-size: 1.5rem; width: 50px; margin-top: 0; line-height: 1;">-</button>
-                <span id="qty-value" style="font-size: 1.5rem; font-weight: bold; color: #333; min-width: 30px; display: inline-block;">${currentQty}</span>
+                <span id="qty-value" style="font-size: 1.5rem; font-weight: bold; color: #e8f1f5; min-width: 30px; display: inline-block;">${currentQty}</span>
                 <button type="button" id="qty-plus" class="btn-action" style="padding: 10px; font-size: 1.5rem; width: 50px; margin-top: 0; line-height: 1;">+</button>
             </div>
             <div class="btn-group" style="display: flex; gap: 10px;">
@@ -1188,9 +1188,9 @@ function openPortionModal(item) {
     }
 
     modal.innerHTML = `
-        <div class="modal-content booking-card" style="max-width: 320px; text-align: center; background: #fff; color: #333;">
-            <h3 style="color: #222;">Select Portion for ${item.name}</h3>
-            <p style="margin-bottom: 20px; color: #666;">Choose between a half or full portion.</p>
+        <div class="modal-content booking-card" style="max-width: 320px; text-align: center; background: #111a22; color: #dce7ed; border: 1px solid rgba(255,255,255,0.12);">
+            <h3 style="color: #eef5f8;">Select Portion for ${item.name}</h3>
+            <p style="margin-bottom: 20px; color: #9fb3bf;">Choose between a half or full portion.</p>
             <div class="btn-group" style="display: flex; gap: 10px; justify-content: center;">
                 <button type="button" id="portion-half-btn" class="btn-action" style="margin-top: 0; flex-grow: 1;">Half (₹${item.price_half})</button>
                 <button type="button" id="portion-full-btn" class="btn-confirm" style="margin-top: 0; flex-grow: 1;">Full (₹${item.price_full})</button>

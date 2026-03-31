@@ -626,6 +626,7 @@ select, input[type="text"], input[type="password"], input[type="email"], input[t
     height: calc(100vh - 40px); /* Prevents the sidebar from extending past the bottom of the screen */
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
 }
 
 .sidebar-header {
@@ -638,6 +639,38 @@ select, input[type="text"], input[type="password"], input[type="email"], input[t
     list-style: none;
     padding: 0;
     flex-grow: 1;
+}
+
+.sidebar-footer {
+    margin-top: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.debug-toggle-btn {
+    min-height: 24px !important;
+    padding: 4px 8px !important;
+    font-size: 0.72rem !important;
+    line-height: 1 !important;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    background: #1e2f3f !important;
+    color: #d9e5ed !important;
+    border: 1px solid rgba(255, 255, 255, 0.18) !important;
+    border-radius: 7px;
+    box-shadow: none !important;
+}
+
+.debug-toggle-btn:hover {
+    background: #264158 !important;
+}
+
+.debug-toggle-btn.off {
+    background: #222a30 !important;
+    color: #9cb0bd !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
 }
 
 .nav-item {
@@ -1072,4 +1105,653 @@ select, input[type="text"], input[type="password"], input[type="email"], input[t
         height: 300px;
         padding: 8px;
     }
+}
+
+/* ==========================================
+   13. THEME CONSISTENCY OVERRIDES
+   Based on web UX guidance:
+   - design tokens for reusable color/spacing
+   - strong contrast and consistent navigation/feedback
+   ========================================== */
+:root {
+    --surface-0: #0f1317;
+    --surface-1: #171d22;
+    --surface-2: #1e252b;
+    --surface-border: rgba(255, 255, 255, 0.09);
+    --text-strong: #f1f5f7;
+    --text-muted: #a8b4bc;
+    --accent: #2ecc71;
+    --accent-strong: #24b864;
+    --danger: #ff6b6b;
+    --focus-ring: 0 0 0 3px rgba(46, 204, 113, 0.28);
+}
+
+body {
+    background: radial-gradient(circle at top right, #20313f 0%, #0f1317 45%), var(--surface-0);
+    color: var(--text-strong);
+}
+
+.history-page,
+.admin-layout {
+    background: linear-gradient(160deg, #121920 0%, #0e1419 100%);
+    color: var(--text-strong);
+}
+
+.container,
+.history-card,
+.content .admin-section,
+.modal-content {
+    color: var(--text-strong);
+}
+
+.data-table {
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.data-table th {
+    background: #25303a;
+    color: #e9eef1;
+    border-bottom: 1px solid var(--surface-border);
+}
+
+.data-table td {
+    color: #d6dee3;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.data-table tbody tr:hover {
+    background: rgba(46, 204, 113, 0.06);
+}
+
+.auth-page {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+}
+
+.auth-card,
+.login-container,
+.register-container {
+    width: min(440px, 94vw);
+    background: linear-gradient(150deg, var(--surface-1) 0%, #12181d 100%);
+    border: 1px solid var(--surface-border);
+    border-radius: 16px;
+    padding: 28px;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);
+}
+
+.auth-card h2,
+.login-container h2,
+.register-container h2 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #f4f8fa;
+}
+
+.auth-helper {
+    color: var(--text-muted);
+    margin: 0 0 16px;
+    font-size: 0.92rem;
+}
+
+.auth-link {
+    display: block;
+    margin-top: 14px;
+    color: #66e2a0;
+    text-decoration: none;
+    font-size: 0.92rem;
+    text-align: center;
+}
+
+.auth-link:hover {
+    text-decoration: underline;
+}
+
+.auth-message {
+    margin-top: 12px;
+    min-height: 1.2em;
+    color: var(--text-muted);
+    font-size: 0.94rem;
+}
+
+.auth-error {
+    color: var(--danger);
+}
+
+button,
+input,
+select,
+textarea,
+a,
+.nav-item {
+    transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+.nav-item:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.btn-action,
+.btn-confirm,
+button {
+    border-radius: 10px;
+}
+
+.btn-action,
+.btn-confirm {
+    background: var(--accent);
+}
+
+.btn-action:hover,
+.btn-confirm:hover,
+button:hover {
+    background: var(--accent-strong);
+}
+
+/* ==========================================
+   14. DESIGN SYSTEM V2 (Intensive Refresh)
+   ========================================== */
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap');
+
+:root {
+    --ink-0: #f6fafc;
+    --ink-1: #d7e2e9;
+    --ink-2: #9cb0bd;
+    --surface-a: #0b1116;
+    --surface-b: #121a20;
+    --surface-c: #18222b;
+    --border-soft: rgba(255, 255, 255, 0.1);
+    --accent-main: #2ecf8f;
+    --accent-hover: #25b37b;
+    --accent-subtle: rgba(46, 207, 143, 0.17);
+    --danger-main: #ff6f7b;
+    --warn-main: #ffb44d;
+    --radius-sm: 10px;
+    --radius-md: 16px;
+    --radius-lg: 22px;
+    --shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.28);
+    --shadow-card: 0 24px 56px rgba(0, 0, 0, 0.36);
+}
+
+html,
+body {
+    font-family: 'Manrope', 'Segoe UI', sans-serif;
+    line-height: 1.45;
+}
+
+h1,
+h2,
+h3,
+h4,
+.logo,
+.sidebar-header h2,
+.section-header h2 {
+    font-family: 'Space Grotesk', 'Manrope', sans-serif;
+    letter-spacing: 0.2px;
+}
+
+body {
+    background:
+        radial-gradient(circle at 12% -10%, rgba(46, 207, 143, 0.2), rgba(46, 207, 143, 0) 40%),
+        radial-gradient(circle at 100% 0%, rgba(63, 147, 246, 0.14), rgba(63, 147, 246, 0) 35%),
+        linear-gradient(160deg, var(--surface-a) 0%, var(--surface-b) 55%, #0d141a 100%);
+    color: var(--ink-0);
+}
+
+a {
+    color: #78ebb7;
+}
+
+.container {
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+}
+
+.system-clock-bar {
+    background: linear-gradient(90deg, #122130, #1c3347 46%, #163142);
+    color: #b9f5d6;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.navbar,
+.main-nav {
+    background: rgba(13, 20, 27, 0.92);
+    border: 1px solid var(--border-soft);
+    backdrop-filter: blur(8px);
+}
+
+.logo {
+    font-size: 1.05rem;
+}
+
+.main-nav {
+    margin: 16px auto 20px;
+    max-width: 1180px;
+    border-radius: 14px;
+}
+
+.main-nav a {
+    color: var(--ink-1);
+}
+
+.main-nav a.active,
+.main-nav a:hover {
+    background: var(--accent-subtle);
+    color: #d9ffee;
+}
+
+.food-card,
+.history-card,
+.menu-item-card,
+.clock-card,
+.booking-card,
+.auth-card,
+.login-container,
+.register-container,
+.content .admin-section,
+.holiday-container .booking-card {
+    background: linear-gradient(152deg, var(--surface-c) 0%, #111a22 100%) !important;
+    color: var(--ink-0);
+    border: 1px solid var(--border-soft) !important;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-soft);
+}
+
+.food-card:hover,
+.menu-item-card:hover,
+.clock-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(46, 207, 143, 0.45) !important;
+}
+
+.page-header h1 {
+    margin-bottom: 6px;
+    font-size: clamp(1.4rem, 2vw, 2rem);
+}
+
+.subtitle {
+    color: var(--ink-2);
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.section-header h2 {
+    margin: 0;
+    font-size: clamp(1.1rem, 1.4vw, 1.5rem);
+}
+
+.sidebar {
+    background: linear-gradient(180deg, #142433 0%, #101c28 100%);
+    border-right: 1px solid var(--border-soft);
+}
+
+.nav-item {
+    border-left: 4px solid transparent;
+    color: var(--ink-1);
+}
+
+.nav-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-item.active {
+    background: rgba(46, 207, 143, 0.2);
+    border-left-color: var(--accent-main);
+    color: #e4fff3;
+}
+
+.content {
+    padding: 30px;
+}
+
+input,
+select,
+textarea,
+.booking-card input,
+.booking-card select,
+.booking-card textarea {
+    background: #101920 !important;
+    color: var(--ink-0) !important;
+    border: 1px solid rgba(116, 164, 195, 0.38) !important;
+    border-radius: var(--radius-sm);
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: #8096a4;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: var(--accent-main) !important;
+    box-shadow: 0 0 0 3px rgba(46, 207, 143, 0.2);
+}
+
+.btn-action,
+.btn-confirm,
+button,
+.plan-btn {
+    background: linear-gradient(180deg, #31d294 0%, #27b77f 100%) !important;
+    color: #062112 !important;
+    border: none;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 20px rgba(23, 167, 111, 0.32);
+}
+
+.btn-action:hover,
+.btn-confirm:hover,
+button:hover,
+.plan-btn:hover {
+    background: linear-gradient(180deg, #3ae7a4 0%, #2cc58a 100%) !important;
+    transform: translateY(-1px);
+}
+
+.btn-danger,
+.logout-btn {
+    background: linear-gradient(180deg, #ff7886 0%, #ea5e6c) !important;
+    border: none !important;
+    color: #2f0b11 !important;
+}
+
+.logout-btn:hover,
+.btn-danger:hover {
+    filter: brightness(1.04);
+}
+
+.history-page .container,
+.history-card,
+.admin-layout .content,
+.admin-layout .admin-section {
+    color: var(--ink-0);
+}
+
+.data-table {
+    background: #121b22 !important;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.data-table th {
+    background: #1a2833 !important;
+    color: #dbe7ee !important;
+    font-weight: 700;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.data-table td {
+    color: #d0dce3 !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.07) !important;
+}
+
+.data-table tbody tr:hover {
+    background: rgba(46, 207, 143, 0.07);
+}
+
+#section-clock,
+.clock-card,
+.menu-item-card,
+.stock-info,
+.walkin-notice {
+    background: linear-gradient(155deg, #17232d 0%, #111a21 100%) !important;
+    color: var(--ink-0) !important;
+    border-color: rgba(96, 149, 186, 0.45) !important;
+}
+
+.clock-card h3,
+.menu-item-card h4,
+.stock-row .label,
+.item-category {
+    color: #dce8ef !important;
+}
+
+.stock-row {
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.status-confirmed,
+.status-pending,
+.flag-badge,
+.monthly-chart-status {
+    border-radius: 999px;
+    font-weight: 700;
+}
+
+.status-confirmed {
+    background: rgba(46, 207, 143, 0.16);
+    color: #a8ffd7;
+}
+
+.status-pending {
+    background: rgba(255, 180, 77, 0.18);
+    color: #ffdca1;
+}
+
+.auth-page {
+    position: relative;
+}
+
+.auth-page::before,
+.auth-page::after {
+    content: "";
+    position: fixed;
+    width: 280px;
+    height: 280px;
+    border-radius: 50%;
+    z-index: -1;
+    filter: blur(10px);
+}
+
+.auth-page::before {
+    top: 5vh;
+    left: 8vw;
+    background: radial-gradient(circle, rgba(46, 207, 143, 0.3) 0%, rgba(46, 207, 143, 0) 65%);
+}
+
+.auth-page::after {
+    bottom: 8vh;
+    right: 8vw;
+    background: radial-gradient(circle, rgba(72, 146, 255, 0.24) 0%, rgba(72, 146, 255, 0) 65%);
+}
+
+.auth-card,
+.login-container,
+.register-container {
+    box-shadow: var(--shadow-card);
+}
+
+.auth-helper {
+    color: #afc1cc;
+    margin-bottom: 14px;
+}
+
+.auth-link {
+    color: #8af1c3;
+}
+
+.modal-content {
+    background: linear-gradient(155deg, #1a2731 0%, #111920 100%) !important;
+    color: var(--ink-0) !important;
+    border: 1px solid var(--border-soft);
+    border-radius: 16px;
+}
+
+.modal-content h1,
+.modal-content h2,
+.modal-content h3,
+.modal-content h4,
+.modal-content p {
+    color: var(--ink-0) !important;
+}
+
+@media (max-width: 992px) {
+    .sidebar {
+        width: 100%;
+        height: auto;
+        position: static;
+        border-right: none;
+        border-bottom: 1px solid var(--border-soft);
+    }
+
+    .content {
+        margin-left: 0;
+        width: auto;
+        padding: 20px 14px 28px;
+    }
+
+    .admin-layout {
+        display: block;
+    }
+
+    .sidebar ul {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .sidebar-footer {
+        padding: 10px;
+    }
+}
+
+@media (max-width: 640px) {
+    .container {
+        border-radius: 14px;
+        padding: 20px 14px;
+    }
+
+    .main-nav a {
+        display: inline-block;
+        margin: 6px;
+        font-size: 0.96rem;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 11px 10px;
+        font-size: 0.86rem;
+    }
+}
+
+/* ==========================================
+   15. Consistency & Contrast Fixes
+   ========================================== */
+.section-control {
+    min-height: 42px;
+    min-width: 160px;
+    padding: 8px 12px;
+}
+
+.profit-summary-block {
+    margin-bottom: 15px;
+}
+
+.profit-summary-panel {
+    padding: 14px;
+    background: linear-gradient(155deg, #12202a 0%, #0f171e 100%);
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    border-radius: 10px;
+}
+
+.profit-metric {
+    margin: 6px 0;
+    color: #dbe5ea;
+}
+
+.profit-metric strong {
+    color: #edf4f7;
+}
+
+.profit-metric.net,
+.profit-metric.net strong {
+    color: #8cf1bf;
+}
+
+.expenses-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.btn-action,
+.btn-confirm,
+.btn-danger,
+.logout-btn,
+button {
+    min-height: 42px;
+    padding: 10px 14px;
+    font-size: 0.95rem;
+    line-height: 1.1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.form-group .btn-action,
+.form-group .btn-confirm,
+.form-group .btn-danger,
+.btn-group .btn-action,
+.btn-group .btn-confirm,
+.btn-group .btn-danger {
+    width: 100%;
+}
+
+.data-table .btn-action,
+.data-table .btn-danger,
+.data-table .btn-confirm {
+    min-height: 34px;
+    padding: 6px 10px;
+    font-size: 0.84rem;
+    border-radius: 8px;
+    width: auto;
+}
+
+.main-nav {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.main-nav a {
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 14px;
+}
+
+.sidebar ul {
+    margin: 0;
+}
+
+.nav-item {
+    min-height: 44px;
 }

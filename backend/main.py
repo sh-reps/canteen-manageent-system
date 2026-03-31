@@ -300,12 +300,14 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
         print(f"❌ ERROR: User {booking_data.admission_no} not found")
         raise HTTPException(status_code=404, detail="User not found")
 
+    user_flags = user.flags or 0
+
     # 2.5 Check if user has reached maximum flags (blocked from booking)
-    if user.flags >= 5:
+    if user_flags >= 5:
         raise HTTPException(status_code=403, detail="You have reached the maximum number of flags and cannot book orders. Please contact the admin to reset your flags.")
 
     # Calculate deposit based on user flags
-    deposit_percentage = calculate_deposit_percentage(user.flags)
+    deposit_percentage = calculate_deposit_percentage(user_flags)
     total_order_value = 0
     for cart_item in booking_data.items:
         item = db.query(models.FoodItem).filter(models.FoodItem.id == cart_item.item_id).first()
@@ -737,7 +739,8 @@ def mark_order_not_collected(order_id: int, db: Session = Depends(get_db)):
     order.status = "not_collected"
     
     # Increment user flags (capped at 5)
-    user.flags = min(user.flags + 1, 5)
+    current_flags = user.flags or 0
+    user.flags = min(current_flags + 1, 5)
     user.flagged_at = time_logic.get_current_datetime()
     
     db.commit()

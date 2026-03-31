@@ -1,0 +1,113 @@
+%% Chen ER Diagram - Canteen Management System
+%% Reference style: classic textbook Chen (monochrome, clean, shape-driven)
+
+flowchart TB
+
+%% ===== ENTITIES (Rectangles) =====
+U[USER]
+B[BOOKING]
+F[FOOD_ITEM]
+BI[BOOKED_ITEM]
+S[SEAT]
+SR[SEAT_RESERVATION]
+R[FOOD_REVIEW]
+
+%% ===== RELATIONSHIPS (Diamonds) =====
+PL{PLACES}
+CT{CONTAINS}
+FI{FOR_ITEM}
+RS{RESERVES}
+OS{OF_SEAT}
+WR{WRITES}
+ON{ON_ITEM}
+
+%% ===== ATTRIBUTES (Ovals) =====
+U1((admission_no - PK))
+U2((role))
+U3((flags))
+
+B1((id - PK))
+B2((booking_date))
+B3((scheduled_slot))
+B4((order_type))
+B5((status))
+
+F1((id - PK))
+F2((name))
+F3((price_full))
+F4((meal_type))
+
+BI1((id - PK))
+BI2((quantity))
+
+S1((id - PK))
+S2((section))
+
+SR1((id - PK))
+SR2((time_slot))
+SR3((reservation_date))
+
+R1((id - PK))
+R2((rating))
+R3((review_text))
+
+%% ===== CORE RELATIONSHIPS + CARDINALITY =====
+U -- "1" --- PL
+PL -- "N" --- B
+
+B -- "1" --- CT
+CT -- "N" --- BI
+
+F -- "1" --- FI
+FI -- "N" --- BI
+
+B -- "1" --- RS
+RS -- "N" --- SR
+
+S -- "1" --- OS
+OS -- "N" --- SR
+
+U -- "1" --- WR
+WR -- "N" --- R
+
+F -- "1" --- ON
+ON -- "N" --- R
+
+%% ===== ATTRIBUTE LINKS =====
+U --- U1
+U --- U2
+U --- U3
+
+B --- B1
+B --- B2
+B --- B3
+B --- B4
+B --- B5
+
+F --- F1
+F --- F2
+F --- F3
+F --- F4
+
+BI --- BI1
+BI --- BI2
+
+S --- S1
+S --- S2
+
+SR --- SR1
+SR --- SR2
+SR --- SR3
+
+R --- R1
+R --- R2
+R --- R3
+
+%% ===== CLASSIC CHEN LOOK (Monochrome) =====
+classDef entity fill:#ffffff,stroke:#000000,stroke-width:1.4px,color:#000000,font-weight:bold;
+classDef relation fill:#ffffff,stroke:#000000,stroke-width:1.4px,color:#000000,font-weight:bold;
+classDef attr fill:#ffffff,stroke:#000000,stroke-width:1px,color:#000000;
+
+class U,B,F,BI,S,SR,R entity;
+class PL,CT,FI,RS,OS,WR,ON relation;
+class U1,U2,U3,B1,B2,B3,B4,B5,F1,F2,F3,F4,BI1,BI2,S1,S2,SR1,SR2,SR3,R1,R2,R3 attr;
