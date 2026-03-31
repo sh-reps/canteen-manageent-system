@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 from typing import List
 from datetime import date, datetime
 from pydantic import BaseModel, EmailStr
@@ -46,6 +47,7 @@ conf = ConnectionConfig(
 # Import your local files
 from . import models, schemas, database, stock_logic, time_logic
 from .database import engine, get_db
+from .logic.utils import calculate_deposit_percentage
 
 # Endpoint to check if 1am/7am logic has run for today
 @app.get("/stock-logic-status")
@@ -183,6 +185,11 @@ async def serve_forgot_password():
 async def serve_reset_password():
     return FileResponse(os.path.join(FRONTEND_DIR, "reset-password.html"))
 
+@app.get("/flagged_users")
+async def serve_flagged_users():
+    return FileResponse(os.path.join(FRONTEND_DIR, "flagged_users.html"))
+
+
 class TimeModel(BaseModel):
     time: str
 
@@ -292,6 +299,21 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
     if not user:
         print(f"❌ ERROR: User {booking_data.admission_no} not found")
         raise HTTPException(status_code=404, detail="User not found")
+
+    # 2.5 Check if user has reached maximum flags (blocked from booking)
+    if user.flags >= 5:
+        raise HTTPException(status_code=403, detail="You have reached the maximum number of flags and cannot book orders. Please contact the admin to reset your flags.")
+
+    # Calculate deposit based on user flags
+    deposit_percentage = calculate_deposit_percentage(user.flags)
+    total_order_value = 0
+    for cart_item in booking_data.items:
+        item = db.query(models.FoodItem).filter(models.FoodItem.id == cart_item.item_id).first()
+        if item:
+            # For simplicity, assuming full price for all items in deposit calculation
+            total_order_value += item.price_full * cart_item.quantity
+    
+    deposit_amount = (total_order_value * deposit_percentage) / 100
     
     # 3. Check for Holidays and Weekends on the requested booking date
     booking_date = booking_data.booking_date
@@ -382,7 +404,12 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
         db.commit()
         db.refresh(new_booking)
         print(f"✅ SUCCESS: Booking {new_booking.id} created for {user.admission_no} on {booking_date}")
-        return {"message": "Booking successful!", "booking_id": new_booking.id}
+        return {
+            "message": "Booking successful!",
+            "booking_id": new_booking.id,
+            "deposit_percentage": deposit_percentage,
+            "deposit_amount": deposit_amount
+        }
 
     except Exception as e:
         db.rollback()
@@ -689,6 +716,40 @@ def complete_order(order_id: int, db: Session = Depends(get_db)):
     return {"status": "success"}
 
 
+@app.post("/mark-order-not-collected/{order_id}")
+def mark_order_not_collected(order_id: int, db: Session = Depends(get_db)):
+    """Marks an order as not collected and flags the user."""
+    order = db.query(models.Booking).filter(models.Booking.id == order_id).first()
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Only uncollected confirmed orders can be marked as not collected
+    if order.status != "confirmed":
+        raise HTTPException(status_code=400, detail=f"Cannot mark {order.status} order as not collected")
+    
+    # Get the user
+    user = db.query(models.User).filter(models.User.admission_no == order.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Mark order as not collected
+    order.status = "not_collected"
+    
+    # Increment user flags (capped at 5)
+    user.flags = min(user.flags + 1, 5)
+    user.flagged_at = time_logic.get_current_datetime()
+    
+    db.commit()
+    
+    return {
+        "status": "success",
+        "message": f"Order marked as not collected. User {user.admission_no} now has {user.flags} flag(s).",
+        "user_flags": user.flags,
+        "flagged_at": user.flagged_at
+    }
+
+
 @app.post("/food-items", status_code=201)
 async def create_food_item(request: Request, db: Session = Depends(get_db)):
     data = await request.json()
@@ -736,8 +797,14 @@ def trigger_logic(time_slot: str, db: Session = Depends(get_db)):
         stock_logic.process_5pm_breakfast_recalc(db)
     elif time_slot == "7am":
         stock_logic.process_7am_breakfast_rollover(db)
+    elif time_slot == "10am":
+        stock_logic.process_10am_breakfast_clear(db)
     elif time_slot == "11am":
         stock_logic.process_11am_lunch_rollover(db)
+    elif time_slot == "2pm":
+        stock_logic.process_2pm_lunch_clear(db)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown time slot: {time_slot}")
     return {"status": "success", "message": f"Executed {time_slot} logic"}
 
 @app.post("/admin/seed-orders")
@@ -950,6 +1017,25 @@ def update_daily_stock(day: str, food_id: int, data: schemas.DailyStockUpdate, d
     db.commit()
     return {"status": "success", "message": "Daily stock updated successfully"}
 
+@app.post("/api/admin/reset-flags/{admission_no}", status_code=status.HTTP_200_OK)
+def reset_user_flags(admission_no: str, db: Session = Depends(get_db)):
+    """Resets a user's flags to 0."""
+    user = db.query(models.User).filter(models.User.admission_no == admission_no).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.flags = 0
+    user.flagged_at = None
+    db.commit()
+    return {"status": "success", "message": f"Flags for user {admission_no} have been reset."}
+
+@app.get("/api/admin/flagged-users", response_model=List[schemas.User])
+def get_flagged_users(db: Session = Depends(get_db)):
+    """Returns a list of all users with flags > 0, ordered by most recently flagged."""
+    return db.query(models.User).filter(models.User.flags > 0).order_by(models.User.flagged_at.desc()).all()
+
+
+
 # This endpoint allows admins to manually update stock pools for a food item
 @app.patch("/food-items/{food_id}/stock")
 def update_stock(food_id: int, data: schemas.DailyStockUpdate, db: Session = Depends(get_db)):
@@ -970,3 +1056,379 @@ def update_stock(food_id: int, data: schemas.DailyStockUpdate, db: Session = Dep
     
     db.commit()
     return {"status": "updated"}
+
+# ==========================================
+# FOOD REVIEW ENDPOINTS
+# ==========================================
+
+@app.get("/api/reviews/food/{food_id}", response_model=dict)
+def get_food_reviews(food_id: int, db: Session = Depends(get_db)):
+    """Get all reviews for a food item with average rating"""
+    
+    # Check if food item exists
+    food_item = db.query(models.FoodItem).filter(models.FoodItem.id == food_id).first()
+    if not food_item:
+        raise HTTPException(status_code=404, detail="Food item not found")
+    
+    # Get all reviews for this food item
+    reviews = db.query(models.FoodReview).filter(
+        models.FoodReview.food_item_id == food_id
+    ).order_by(models.FoodReview.created_at.desc()).all()
+    
+    # Calculate average rating
+    if reviews:
+        avg_rating = sum(r.rating for r in reviews) / len(reviews)
+    else:
+        avg_rating = 0
+    
+    # Format reviews for response
+    reviews_list = [
+        {
+            "id": r.id,
+            "user_id": r.user_id,
+            "rating": r.rating,
+            "review_text": r.review_text,
+            "created_at": r.created_at.isoformat() if r.created_at else None
+        }
+        for r in reviews
+    ]
+    
+    return {
+        "food_id": food_id,
+        "food_name": food_item.name,
+        "average_rating": round(avg_rating, 1),
+        "total_reviews": len(reviews),
+        "reviews": reviews_list
+    }
+
+@app.post("/api/reviews")
+def submit_review(admission_no: str = Body(...), food_id: int = Body(...), rating: int = Body(...), review_text: str = Body(None), db: Session = Depends(get_db)):
+    """Submit a review for a food item"""
+    
+    # Validate rating
+    if not (1 <= rating <= 5):
+        raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+    
+    # Check if user exists
+    user = db.query(models.User).filter(models.User.admission_no == admission_no).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if food item exists
+    food_item = db.query(models.FoodItem).filter(models.FoodItem.id == food_id).first()
+    if not food_item:
+        raise HTTPException(status_code=404, detail="Food item not found")
+    
+    # Check if user already reviewed this item
+    existing_review = db.query(models.FoodReview).filter(
+        models.FoodReview.food_item_id == food_id,
+        models.FoodReview.user_id == admission_no
+    ).first()
+    
+    if existing_review:
+        # Update existing review
+        existing_review.rating = rating
+        existing_review.review_text = review_text
+        existing_review.created_at = time_logic.get_current_datetime()
+        db.commit()
+        return {"status": "updated", "message": "Review updated successfully", "review_id": existing_review.id}
+    else:
+        # Create new review
+        new_review = models.FoodReview(
+            food_item_id=food_id,
+            user_id=admission_no,
+            rating=rating,
+            review_text=review_text
+        )
+        db.add(new_review)
+        db.commit()
+        db.refresh(new_review)
+        return {"status": "created", "message": "Review submitted successfully", "review_id": new_review.id}
+
+@app.delete("/api/reviews/{review_id}")
+def delete_review(review_id: int, admission_no: str = Query(None), db: Session = Depends(get_db)):
+    """Delete a review. Owner or admin can delete"""
+    
+    review = db.query(models.FoodReview).filter(models.FoodReview.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    # Check permissions - owner or admin can delete
+    if admission_no:
+        # Check if user is owner or admin
+        if admission_no == review.user_id:
+            # User is the owner
+            pass
+        else:
+            # Check if user is an admin
+            user = db.query(models.User).filter(models.User.admission_no == admission_no).first()
+            if not user or user.role != "admin":
+                raise HTTPException(status_code=403, detail="Not authorized to delete this review")
+    
+    db.delete(review)
+    db.commit()
+    return {"status": "success", "message": "Review deleted successfully"}
+
+# --- PROFIT MANAGEMENT ---
+
+def get_week_start_end(target_date):
+    """Get the Monday-Sunday week for a given date"""
+    from datetime import datetime, timedelta, date as date_type
+    
+    # Convert to date object if needed
+    if isinstance(target_date, str):
+        dt = datetime.strptime(target_date, "%Y-%m-%d").date()
+    elif isinstance(target_date, datetime):
+        dt = target_date.date()
+    else:
+        dt = target_date
+    
+    # Convert to datetime for weekday calculation
+    dt_temp = datetime.combine(dt, datetime.min.time())
+    monday = dt_temp - timedelta(days=dt_temp.weekday())
+    sunday = monday + timedelta(days=6)
+    return monday.date(), sunday.date()
+
+def calculate_week_revenue(week_start, week_end, db):
+    """Calculate total revenue from collected/completed orders for a week"""
+    try:
+        total = db.query(
+            func.coalesce(func.sum(models.BookedItem.quantity * models.FoodItem.price_full), 0)
+        ).select_from(models.Booking).join(
+            models.BookedItem, models.BookedItem.booking_id == models.Booking.id
+        ).join(
+            models.FoodItem, models.FoodItem.id == models.BookedItem.food_item_id
+        ).filter(
+            models.Booking.booking_date >= week_start,
+            models.Booking.booking_date <= week_end,
+            models.Booking.status.in_(["collected", "completed"])
+        ).scalar()
+
+        return int(total or 0)
+    except Exception as e:
+        print(f"Error calculating revenue: {e}")
+        return 0
+
+@app.get("/api/admin/daily-expenses")
+def get_daily_expenses(week_start: date = Query(None), db: Session = Depends(get_db)):
+    """Get all daily expenses, optionally filtered by week"""
+    try:
+        if week_start:
+            week_start_date, week_end_date = get_week_start_end(week_start)
+            expenses = db.query(models.DailyExpense).filter(
+                models.DailyExpense.expense_date >= week_start_date,
+                models.DailyExpense.expense_date <= week_end_date
+            ).order_by(models.DailyExpense.expense_date).all()
+        else:
+            expenses = db.query(models.DailyExpense).order_by(models.DailyExpense.expense_date.desc()).all()
+        
+        return [
+            {
+                'id': e.id,
+                'expense_date': e.expense_date,
+                'amount': e.amount,
+                'description': e.description,
+                'created_at': e.created_at,
+                'updated_at': e.updated_at
+            }
+            for e in expenses
+        ]
+    except Exception as e:
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/admin/daily-expenses")
+def add_or_update_daily_expense(expense_date: date = Body(...), amount: int = Body(...), description: str = Body(None), db: Session = Depends(get_db)):
+    """Add or update a daily expense"""
+    try:
+        existing = db.query(models.DailyExpense).filter(
+            models.DailyExpense.expense_date == expense_date
+        ).first()
+        
+        if existing:
+            existing.amount = amount
+            existing.description = description
+            existing.updated_at = time_logic.get_current_datetime()
+            db.commit()
+            action = "updated"
+        else:
+            new_expense = models.DailyExpense(
+                expense_date=expense_date,
+                amount=amount,
+                description=description
+            )
+            db.add(new_expense)
+            db.commit()
+            action = "created"
+        
+        return {"status": action, "message": f"Expense {action} successfully"}
+    except Exception as e:
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/weekly-profit")
+def get_weekly_profit(week_start: date = Query(None), db: Session = Depends(get_db)):
+    """Get profit data for a specific week and recalculate if needed"""
+    try:
+        if not week_start:
+            week_start = time_logic.get_current_date()
+        
+        week_start_date, week_end_date = get_week_start_end(week_start)
+        
+        # Calculate revenue from completed orders
+        revenue = calculate_week_revenue(week_start_date, week_end_date, db)
+        
+        # Get total expenses for the week
+        expenses = db.query(models.DailyExpense).filter(
+            models.DailyExpense.expense_date >= week_start_date,
+            models.DailyExpense.expense_date <= week_end_date
+        ).all()
+        
+        total_expenses = sum(e.amount for e in expenses)
+        net_profit = revenue - total_expenses
+        
+        # Get or create weekly profit record
+        weekly_record = db.query(models.WeeklyProfit).filter(
+            models.WeeklyProfit.week_start_date == week_start_date
+        ).first()
+        
+        if weekly_record:
+            weekly_record.total_revenue = revenue
+            weekly_record.total_expenses = total_expenses
+            weekly_record.net_profit = net_profit
+            weekly_record.updated_at = time_logic.get_current_datetime()
+            db.commit()
+        else:
+            weekly_record = models.WeeklyProfit(
+                week_start_date=week_start_date,
+                week_end_date=week_end_date,
+                total_revenue=revenue,
+                total_expenses=total_expenses,
+                net_profit=net_profit
+            )
+            db.add(weekly_record)
+            db.commit()
+        
+        # Get daily expenses for frontend
+        daily_expenses = [
+            {
+                'expense_date': str(e.expense_date),
+                'amount': e.amount,
+                'description': e.description
+            }
+            for e in expenses
+        ]
+        
+        return {
+            "week_start_date": str(week_start_date),
+            "week_end_date": str(week_end_date),
+            "total_revenue": revenue,
+            "total_expenses": total_expenses,
+            "net_profit": net_profit,
+            "daily_expenses": daily_expenses
+        }
+    except Exception as e:
+        import traceback
+        print(f"Error in get_weekly_profit: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/monthly-profit")
+def get_monthly_profit(year: int = Query(None), month: int = Query(None), db: Session = Depends(get_db)):
+    """Get profit data for all weeks in a month"""
+    try:
+        from datetime import datetime
+        if not year or not month:
+            today = time_logic.get_current_date()
+            year = today.year
+            month = today.month
+        
+        # Calculate month boundaries properly
+        start_date = date(year, month, 1)
+        if month == 12:
+            end_date = date(year + 1, 1, 1)
+        else:
+            end_date = date(year, month + 1, 1)
+        
+        # Get all weekly profits for the month
+        weekly_profits = db.query(models.WeeklyProfit).filter(
+            models.WeeklyProfit.week_start_date >= start_date,
+            models.WeeklyProfit.week_start_date < end_date
+        ).order_by(models.WeeklyProfit.week_start_date).all()
+        
+        # If no data yet, calculate from expenses
+        if not weekly_profits:
+            # Get all daily expenses for the month
+            expenses = db.query(models.DailyExpense).filter(
+                models.DailyExpense.expense_date >= start_date,
+                models.DailyExpense.expense_date < end_date
+            ).all()
+            
+            # Group by week and calculate
+            weeks_data = {}
+            for expense in expenses:
+                week_start, week_end = get_week_start_end(expense.expense_date)
+                if week_start not in weeks_data:
+                    weeks_data[week_start] = {
+                        'week_start': str(week_start),
+                        'week_end': str(week_end),
+                        'expenses': 0,
+                        'revenue': 0
+                    }
+                weeks_data[week_start]['expenses'] += expense.amount
+            
+            # Calculate revenue for each week
+            for week_start_key, data in weeks_data.items():
+                week_start_date = datetime.strptime(data['week_start'], "%Y-%m-%d").date()
+                week_end_date = datetime.strptime(data['week_end'], "%Y-%m-%d").date()
+                data['revenue'] = calculate_week_revenue(week_start_date, week_end_date, db)
+                data['profit'] = data['revenue'] - data['expenses']
+                
+                # Save to database
+                db.add(models.WeeklyProfit(
+                    week_start_date=week_start_date,
+                    week_end_date=week_end_date,
+                    total_revenue=data['revenue'],
+                    total_expenses=data['expenses'],
+                    net_profit=data['profit']
+                ))
+            db.commit()
+            
+            weekly_profits = list(weeks_data.values())
+        else:
+            weekly_profits = [
+                {
+                    'week_start': str(w.week_start_date),
+                    'week_end': str(w.week_end_date),
+                    'revenue': w.total_revenue,
+                    'expenses': w.total_expenses,
+                    'profit': w.net_profit
+                }
+                for w in weekly_profits
+            ]
+        
+        return {
+            "year": year,
+            "month": month,
+            "weeks": weekly_profits
+        }
+    except Exception as e:
+        import traceback
+        print(f"Error in get_monthly_profit: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/admin/daily-expenses/{expense_id}")
+def delete_daily_expense(expense_id: int, db: Session = Depends(get_db)):
+    """Delete a daily expense"""
+    try:
+        expense = db.query(models.DailyExpense).filter(models.DailyExpense.id == expense_id).first()
+        if not expense:
+            raise HTTPException(status_code=404, detail="Expense not found")
+        
+        db.delete(expense)
+        db.commit()
+        return {"status": "success", "message": "Expense deleted successfully"}
+    except Exception as e:
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

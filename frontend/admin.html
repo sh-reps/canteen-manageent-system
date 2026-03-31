@@ -6,6 +6,7 @@
     <title>Canteen Admin - Dashboard</title>
     <link rel="stylesheet" href="./css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="admin-layout">
 
@@ -24,6 +25,9 @@
             <li id="nav-users" onclick="showSection('users')" class="nav-item">
                 <i class="fas fa-users"></i> Users
             </li>
+            <li id="nav-flagged-users" onclick="location.href='/flagged_users'" class="nav-item">
+                <i class="fas fa-flag"></i> Flagged Users
+            </li>
             <li id="nav-menu" onclick="showSection('menu')" class="nav-item">
                 <i class="fas fa-utensils"></i> Menu
             </li>
@@ -35,6 +39,9 @@
             </li>
             <li id="nav-holidays" onclick="showSection('holidays')" class="nav-item">
                 <i class="fas fa-calendar-times"></i> Holidays
+            </li>
+            <li id="nav-profits" onclick="showSection('profits')" class="nav-item">
+                <i class="fas fa-chart-line"></i> Profits
             </li>
         </ul>
         <div class="sidebar-footer">
@@ -150,7 +157,9 @@
                         <button onclick="triggerLogic('1am')" class="btn-action">🔴 Trigger 1 AM (Lunch Recalc)</button>
                         <button onclick="triggerLogic('5pm')" class="btn-action">🟠 Trigger 5 PM (Next Day Breakfast)</button>
                         <button onclick="triggerLogic('7am')" class="btn-action">🟡 Trigger 7 AM (Breakfast Roll)</button>
+                        <button onclick="triggerLogic('10am')" class="btn-action">🔵 Trigger 10 AM (Breakfast Clear)</button>
                         <button onclick="triggerLogic('11am')" class="btn-action">🟢 Trigger 11 AM (Lunch Roll)</button>
+                        <button onclick="triggerLogic('2pm')" class="btn-action">🟣 Trigger 2 PM (Lunch Clear)</button>
                     </div>
                 </div>
                 <div class="clock-card">
@@ -180,6 +189,50 @@
                 <div class="booking-card">
                     <h3>Official Holidays</h3>
                     <ul id="holiday-list" class="holiday-list-class"></ul>
+                </div>
+            </div>
+        </section>
+
+        <section id="section-profits" class="admin-section" style="display:none;">
+            <div class="section-header">
+                <h2>Profit Management</h2>
+            </div>
+            <div class="profits-container">
+                <div class="booking-card" style="grid-column: 1; margin-bottom: 20px;">
+                    <h3>Weekly Profit</h3>
+                    <div id="profit-summary" style="margin-bottom: 15px;">
+                        <div style="padding: 12px; background: #f8f9fa; border-radius: 6px; margin-bottom: 10px;">
+                            <p style="margin: 5px 0;"><strong>Week:</strong> <span id="week-range"></span></p>
+                            <p style="margin: 5px 0;"><strong>Total Revenue:</strong> ₹<span id="total-revenue">0</span></p>
+                            <p style="margin: 5px 0;"><strong>Total Expenses:</strong> ₹<span id="total-expenses">0</span></p>
+                            <p style="margin: 5px 0;"><strong style="color: #2ecc71;">Net Profit:</strong> ₹<span id="net-profit">0</span></p>
+                        </div>
+                    </div>
+
+                    <h4>Add Daily Expense</h4>
+                    <div class="form-group">
+                        <label>Expense Date</label>
+                        <input type="date" id="expense-date">
+                        <label>Amount (₹)</label>
+                        <input type="number" id="expense-amount" placeholder="0" min="0">
+                        <label>Description</label>
+                        <input type="text" id="expense-description" placeholder="e.g., Gas, Supplies, Food">
+                        <button onclick="saveExpense()" class="btn-confirm">Save Expense</button>
+                    </div>
+
+                    <h4 style="margin-top: 20px;">Daily Expenses This Week</h4>
+                    <div id="expenses-list" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; padding: 10px;">
+                    </div>
+                </div>
+
+                <div class="booking-card profit-chart-card" style="grid-column: 2; min-height: 500px;">
+                    <div class="profit-chart-head">
+                        <h3>Monthly Profit Chart</h3>
+                        <p id="monthly-chart-status" class="monthly-chart-status" style="display: none;"></p>
+                    </div>
+                    <div class="profit-chart-wrap">
+                        <canvas id="profit-chart"></canvas>
+                    </div>
                 </div>
             </div>
         </section>
@@ -254,6 +307,22 @@
             <div class="btn-group">
                 <button onclick="saveStockEdit()" class="btn-confirm">Update Stock</button>
                 <button onclick="closeModal('edit-stock-modal')" class="btn-action">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reviews-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content booking-card" style="max-width: 500px; max-height: 80vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="margin: 0;">Reviews for <span id="review-food-name"></span></h3>
+                <button onclick="closeModal('reviews-modal')" class="close-x">&times;</button>
+            </div>
+            <input type="hidden" id="review-food-id">
+            <div id="reviews-list-admin" style="border: 1px solid #333; border-radius: 6px; padding: 12px; max-height: 400px; overflow-y: auto;">
+                <!-- Reviews will be loaded here -->
+            </div>
+            <div class="btn-group" style="margin-top: 15px;">
+                <button onclick="closeModal('reviews-modal')" class="btn-action">Close</button>
             </div>
         </div>
     </div>

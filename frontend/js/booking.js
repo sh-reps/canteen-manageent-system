@@ -147,7 +147,7 @@ window.showFoodInfo = function(item) {
     const imgHtml = item.image_url ? `<img src="${item.image_url}" alt="${item.name}" style="width: 100%; border-radius: 8px; margin-bottom: 15px; max-height: 180px; object-fit: cover; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">` : '';
     
     modal.innerHTML = `
-        <div class="modal-content booking-card" style="max-width: 350px; text-align: center; background: #fff; color: #333; position: relative; padding: 25px;">
+        <div class="modal-content booking-card" style="max-width: 450px; max-height: 85vh; overflow-y: auto; text-align: center; background: #fff; color: #333; position: relative; padding: 25px;">
             <button class="close-x" onclick="document.getElementById('food-info-modal').style.display='none'" style="position: absolute; top: 10px; right: 15px; font-size: 1.5rem; background: transparent; border: none; cursor: pointer; color: #333;">&times;</button>
             ${imgHtml}
             <h3 style="color: #222; margin-bottom: 10px; font-size: 1.4rem;">${item.name}</h3>
@@ -156,10 +156,163 @@ window.showFoodInfo = function(item) {
             <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 1.1rem; border: 1px solid #eee;">
                 ${priceHtml}
             </div>
-            <button class="btn-confirm" onclick="document.getElementById('food-info-modal').style.display='none'" style="width: 100%;">Close</button>
+            
+            <!-- Reviews Section -->
+            <div id="reviews-section-${item.id}" style="margin-top: 20px; border-top: 2px solid #eee; padding-top: 15px; text-align: left;">
+                <div id="reviews-loading-${item.id}" style="text-align: center; color: #999;">Loading reviews...</div>
+            </div>
+            
+            <button class="btn-confirm" onclick="document.getElementById('food-info-modal').style.display='none'" style="width: 100%; margin-top: 15px;">Close</button>
         </div>
     `;
     modal.style.display = 'flex';
+    
+    // Load reviews
+    loadFoodReviews(item.id);
+};
+
+async function loadFoodReviews(foodId) {
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/api/reviews/food/${foodId}`);
+        const data = await response.json();
+        
+        const reviewsSection = document.getElementById(`reviews-section-${foodId}`);
+        const admission_no = localStorage.getItem('admission_no');
+        const userRole = localStorage.getItem('role');
+        
+        // Average rating display
+        let ratingStars = '';
+        if (data.average_rating > 0) {
+            const fullStars = Math.floor(data.average_rating);
+            const hasHalfStar = data.average_rating % 1 >= 0.5;
+            for (let i = 0; i < 5; i++) {
+                if (i < fullStars) ratingStars += '⭐';
+                else if (i === fullStars && hasHalfStar) ratingStars += '⭐';
+                else ratingStars += '☆';
+            }
+        }
+        
+        let reviewsHtml = `
+            <div style="margin-bottom: 15px;">
+                <h4 style="margin: 0 0 8px 0; color: #222;">Customer Reviews</h4>
+                ${data.average_rating > 0 ? `
+                    <div style="font-size: 1.2rem; color: #f39c12; margin-bottom: 5px;">${ratingStars} ${data.average_rating}/5 (${data.total_reviews} review${data.total_reviews !== 1 ? 's' : ''})</div>
+                ` : `
+                    <div style="font-size: 0.9rem; color: #999;">No reviews yet. Be the first to review!</div>
+                `}
+            </div>
+        `;
+        
+        // Review submission form
+        if (admission_no) {
+            reviewsHtml += `
+                <div style="background: #f5f5f5; padding: 12px; border-radius: 6px; margin-bottom: 15px;">
+                    <h5 style="margin: 0 0 10px 0; color: #222; font-size: 0.95rem;">Your Review</h5>
+                    <div style="display: flex; gap: 5px; margin-bottom: 10px; justify-content: center;">
+                        ${[1,2,3,4,5].map(i => `
+                            <button class="star-btn" data-rating="${i}" onclick="setRating(${foodId}, ${i})" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; opacity: 0.5; transition: opacity 0.2s;">☆</button>
+                        `).join('')}
+                    </div>
+                    <textarea id="review-text-${foodId}" placeholder="Share your thoughts..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem; resize: vertical; min-height: 60px;"></textarea>
+                    <button onclick="submitReview(${foodId})" style="width: 100%; margin-top: 8px; padding: 8px; background: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Submit Review</button>
+                </div>
+            `;
+        }
+        
+        // Display reviews
+        if (data.reviews && data.reviews.length > 0) {
+            reviewsHtml += `<div style="max-height: 300px; overflow-y: auto;">`;
+            data.reviews.forEach(review => {
+                let stars = '';
+                for (let i = 0; i < 5; i++) {
+                    stars += i < review.rating ? '⭐' : '☆';
+                }
+                
+                const canDelete = admission_no === review.user_id || userRole === 'admin';
+                reviewsHtml += `
+                    <div style="background: #fff; padding: 12px; border: 1px solid #eee; border-radius: 4px; margin-bottom: 8px; text-align: left;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                            <strong style="color: #222;">${review.user_id}</strong>
+                            <span style="font-size: 0.8rem; color: #999;">${new Date(review.created_at).toLocaleDateString()}</span>
+                        </div>
+                        <div style="color: #f39c12; font-size: 0.9rem; margin-bottom: 5px;">${stars} ${review.rating}/5</div>
+                        ${review.review_text ? `<p style="margin: 5px 0; font-size: 0.9rem; color: #555;">${review.review_text}</p>` : ''}
+                        ${canDelete ? `<button onclick="deleteReview(${review.id}, ${foodId})" style="font-size: 0.8rem; padding: 4px 8px; background: #e74c3c; color: white; border: none; border-radius: 3px; cursor: pointer;">Delete</button>` : ''}
+                    </div>
+                `;
+            });
+            reviewsHtml += `</div>`;
+        }
+        
+        reviewsSection.innerHTML = reviewsHtml;
+        
+    } catch (error) {
+        console.error("Error loading reviews:", error);
+        document.getElementById(`reviews-section-${foodId}`).innerHTML = `<p style="color: #e74c3c;">Error loading reviews</p>`;
+    }
+}
+
+function setRating(foodId, rating) {
+    // Update visual rating
+    document.querySelectorAll(`#reviews-section-${foodId} .star-btn`).forEach((btn, i) => {
+        btn.style.opacity = i < rating ? '1' : '0.5';
+    });
+    // Store rating for submission
+    window.currentRating = rating;
+}
+
+async function submitReview(foodId) {
+    const admission_no = localStorage.getItem('admission_no');
+    const rating = window.currentRating || 0;
+    const review_text = document.getElementById(`review-text-${foodId}`).value;
+    
+    if (rating === 0) {
+        alert('Please select a rating');
+        return;
+    }
+    
+    try {
+        const response = await fetch('http://127.0.0.1:8000/api/reviews', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ admission_no, food_id: foodId, rating, review_text })
+        });
+        
+        const data = await response.json();
+        if (response.ok) {
+            alert('✅ Review submitted successfully!');
+            window.currentRating = 0;
+            document.getElementById(`review-text-${foodId}`).value = '';
+            loadFoodReviews(foodId); // Reload reviews
+        } else {
+            alert('Error: ' + (data.detail || 'Failed to submit review'));
+        }
+    } catch (error) {
+        console.error("Error submitting review:", error);
+        alert('Error submitting review');
+    }
+}
+
+async function deleteReview(reviewId, foodId) {
+    if (!confirm('Delete this review?')) return;
+    
+    const admission_no = localStorage.getItem('admission_no');
+    
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/api/reviews/${reviewId}?admission_no=${admission_no}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            alert('Review deleted');
+            loadFoodReviews(foodId); // Reload reviews
+        } else {
+            alert('Failed to delete review');
+        }
+    } catch (error) {
+        console.error("Error deleting review:", error);
+        alert('Error deleting review');
+    }
 };
 
 function initializeNav() {

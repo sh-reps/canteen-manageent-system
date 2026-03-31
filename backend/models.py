@@ -11,6 +11,8 @@ class User(Base):
     email = Column(String, nullable=True)
     reset_token = Column(String, nullable=True)
     reset_token_expiry = Column(DateTime, nullable=True)
+    flags = Column(Integer, default=0)
+    flagged_at = Column(DateTime, nullable=True)
 
 # In backend/models.py
 class FoodItem(Base):
@@ -105,3 +107,35 @@ class LogicRun(Base):
     id = Column(Integer, primary_key=True)
     logic_name = Column(String, nullable=False) # e.g., 'lunch_1am'
     last_run_date = Column(Date, nullable=False)
+
+class FoodReview(Base):
+    __tablename__ = "food_reviews"
+    id = Column(Integer, primary_key=True, index=True)
+    food_item_id = Column(Integer, ForeignKey("food_items.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.admission_no"), nullable=False)
+    rating = Column(Integer, nullable=False)  # 1-5
+    review_text = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=time_logic.get_current_datetime)
+    
+    food_item = relationship("FoodItem")
+    user = relationship("User")
+
+class DailyExpense(Base):
+    __tablename__ = "daily_expenses"
+    id = Column(Integer, primary_key=True, index=True)
+    expense_date = Column(Date, nullable=False, unique=True, index=True)
+    amount = Column(Integer, nullable=False)  # In cents or rupees
+    description = Column(String, nullable=True)
+    created_at = Column(DateTime, default=time_logic.get_current_datetime)
+    updated_at = Column(DateTime, default=time_logic.get_current_datetime, onupdate=time_logic.get_current_datetime)
+
+class WeeklyProfit(Base):
+    __tablename__ = "weekly_profits"
+    id = Column(Integer, primary_key=True, index=True)
+    week_start_date = Column(Date, nullable=False, unique=True, index=True)
+    week_end_date = Column(Date, nullable=False)
+    total_revenue = Column(Integer, default=0)  # Sum of completed order values
+    total_expenses = Column(Integer, default=0)  # Sum of daily expenses for the week
+    net_profit = Column(Integer, default=0)  # Revenue - Expenses
+    created_at = Column(DateTime, default=time_logic.get_current_datetime)
+    updated_at = Column(DateTime, default=time_logic.get_current_datetime, onupdate=time_logic.get_current_datetime)

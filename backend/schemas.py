@@ -2,11 +2,23 @@ from pydantic import BaseModel, validator, EmailStr
 from typing import List, Optional
 from datetime import date, datetime
 
+class User(BaseModel):
+    admission_no: str
+    role: str
+    email: Optional[EmailStr] = None
+    flags: int
+    flagged_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
 class UserCreate(BaseModel):
     admission_no: str
     password: str
     role: Optional[str] = "student"
     email: Optional[EmailStr] = None
+    flags: Optional[int] = 0
+    flagged_at: Optional[datetime] = None
 
     @validator('password')
     def password_length(cls, v):
@@ -135,9 +147,72 @@ class BookingResponse(BaseModel):
 class HolidayCreate(BaseModel):
     date: date
 
+
 class Holiday(BaseModel):
     id: int
     date: date
+
+    class Config:
+        from_attributes = True
+
+class FoodReviewCreate(BaseModel):
+    rating: int  # 1-5
+    review_text: Optional[str] = None
+
+class FoodReview(BaseModel):
+    id: int
+    food_item_id: int
+    user_id: str
+    rating: int
+    review_text: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class FoodReviewResponse(BaseModel):
+    id: int
+    food_item_id: int
+    user_id: str
+    rating: int
+    review_text: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class DailyExpenseCreate(BaseModel):
+    expense_date: date
+    amount: int
+    description: Optional[str] = None
+
+class DailyExpense(BaseModel):
+    id: int
+    expense_date: date
+    amount: int
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class WeeklyProfitCreate(BaseModel):
+    week_start_date: date
+    week_end_date: date
+    total_revenue: int
+    total_expenses: int
+    net_profit: int
+
+class WeeklyProfit(BaseModel):
+    id: int
+    week_start_date: date
+    week_end_date: date
+    total_revenue: int
+    total_expenses: int
+    net_profit: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

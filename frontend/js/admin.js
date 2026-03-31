@@ -36,6 +36,30 @@ async function completeOrder(orderId) {
     }
 }
 
+async function markOrderNotCollected(orderId) {
+    if (!confirm("Mark this order as not collected? This will flag the user.")) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/mark-order-not-collected/${orderId}`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            alert(`Order marked as not collected.\nUser now has ${data.user_flags} flag(s).`);
+            loadAllOrders(); // Refresh the order list
+        } else {
+            const error = await response.json();
+            alert("Failed to mark order as not collected: " + (error.detail || "Unknown error"));
+        }
+    } catch (err) {
+        console.error("Error marking order as not collected:", err);
+        alert("Error: " + err.message);
+    }
+}
+
 // Utility to open/close modals
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
@@ -130,6 +154,14 @@ function showSection(sectionId) {
     if (sectionId === 'menu') loadFoodCatalog();
     if (sectionId === 'stock') loadDailyStock();
     if (sectionId === 'holidays') loadHolidays();
+    if (sectionId === 'profits') {
+        setMonthlyChartStatus('Loading monthly chart...', true, false);
+        // Set today's date as default in expense-date field
+        const today = new Date().toISOString().split('T')[0];
+        const expenseDateInput = document.getElementById('expense-date');
+        if (expenseDateInput) expenseDateInput.value = today;
+        loadProfitData();
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -183,8 +215,11 @@ async function loadAllOrders() {
                 <td>${order.items && order.items.length > 0 ? order.items.map(i => i.food_item ? i.food_item.name : 'Unknown/Deleted Item').join(", ") : 'No items'}</td>
                 <td>
                     ${order.status === 'collected' 
-                        ? '<span style="color: #2ecc71; font-weight: bold;">Collected</span>' 
-                        : `<button class="btn-action" onclick="completeOrder(${order.id})">Mark Collected</button>`}
+                        ? '<span style="color: #2ecc71; font-weight: bold;">✓ Collected</span>' 
+                        : order.status === 'not_collected'
+                        ? '<span style="color: #e74c3c; font-weight: bold;">✗ Not Collected</span>'
+                        : `<button class="btn-action" onclick="completeOrder(${order.id})">Mark Collected</button>
+                           <button class="btn-danger" onclick="markOrderNotCollected(${order.id})">Mark Not Collected</button>`}
                 </td>
             </tr>
         `).join('');
@@ -367,6 +402,9 @@ async function loadFoodCatalog() {
             <div style="margin-top: 10px;">
                 <button class="btn-action" onclick='openFoodModal(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})'>
                     <i class="fas fa-edit"></i> Edit Details
+                </button>
+                <button class="btn-confirm" onclick="openReviewsModal(${item.id}, '${item.name}')">
+                    <i class="fas fa-star"></i> View Reviews
                 </button>
                 <button class="btn-danger" onclick="deleteFood(${item.id})">
                     <i class="fas fa-trash"></i> Delete
@@ -746,4 +784,439 @@ async function deleteHoliday(id) {
     } catch (err) {
         console.error("Error deleting holiday:", err);
     }
+}
+
+// --- REVIEWS MANAGEMENT ---
+async function openReviewsModal(foodId, foodName) {
+    const modal = document.getElementById('reviews-modal');
+    if (!modal) {
+        alert('Reviews modal not found!');
+        return;
+    }
+    
+    // Set food info
+    document.getElementById('review-food-name').textContent = foodName;
+    document.getElementById('review-food-id').value = foodId;
+    
+    // Load reviews
+    await loadFoodReviewsAdmin(foodId);
+    
+    openModal('reviews-modal');
+}
+
+async function loadFoodReviewsAdmin(foodId) {
+    const reviewsContainer = document.getElementById('reviews-list-admin');
+    reviewsContainer.innerHTML = '<p style="text-align: center; color: #999;">Loading reviews...</p>';
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/reviews/food/${foodId}`);
+        if (!response.ok) throw new Error('Failed to fetch reviews');
+        
+        const data = await response.json();
+        
+        if (!data.reviews || data.reviews.length === 0) {
+            reviewsContainer.innerHTML = '<p style="text-align: center; color: #999;">No reviews yet.</p>';
+            return;
+        }
+        
+        let html = `<div style="margin-bottom: 15px;">
+            <strong>Average Rating: ${data.average_rating}/5</strong> (${data.total_reviews} review${data.total_reviews !== 1 ? 's' : ''})
+        </div>`;
+        
+        html += data.reviews.map(review => {
+            let stars = '';
+            for (let i = 0; i < 5; i++) {
+                stars += i < review.rating ? '⭐' : '☆';
+            }
+            return `
+                <div style="background: #1a1a1a; padding: 12px; border: 1px solid #333; border-radius: 6px; margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <strong>${review.user_id}</strong>
+                        <span style="font-size: 0.8rem; color: #999;">${new Date(review.created_at).toLocaleString()}</span>
+                    </div>
+                    <div style="color: #f39c12; margin-bottom: 8px;">${stars} ${review.rating}/5</div>
+                    ${review.review_text ? `<p style="margin: 8px 0; color: #bbb;">${review.review_text}</p>` : ''}
+                    <button class="btn-danger" onclick="deleteReviewAdmin(${review.id}, ${document.getElementById('review-food-id').value})" style="padding: 6px 12px; font-size: 0.85rem;">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
+                </div>
+            `;
+        }).join('');
+        
+        reviewsContainer.innerHTML = html;
+    } catch (error) {
+        console.error('Error loading reviews:', error);
+        reviewsContainer.innerHTML = '<p style="text-align: center; color: #e74c3c;">Error loading reviews</p>';
+    }
+}
+
+async function deleteReviewAdmin(reviewId, foodId) {
+    if (!confirm('Delete this review?')) return;
+    
+    const adminId = localStorage.getItem('admission_no'); // Get logged-in admin's ID
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/reviews/${reviewId}?admission_no=${adminId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            await loadFoodReviewsAdmin(foodId);
+        } else {
+            alert('Failed to delete review');
+        }
+    } catch (error) {
+        console.error('Error deleting review:', error);
+        alert('Error deleting review');
+    }
+}
+
+// --- PROFIT MANAGEMENT ---
+let currentWeekDate = new Date();
+
+function getWeekStartEnd(date) {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = d.getDate() - day;
+    const monday = new Date(d.setDate(diff));
+    const sunday = new Date(d.setDate(diff + 6));
+    return {
+        start: monday.toISOString().split('T')[0],
+        end: sunday.toISOString().split('T')[0],
+        startObj: monday,
+        endObj: sunday
+    };
+}
+
+async function loadProfitData() {
+    const week = getWeekStartEnd(currentWeekDate);
+    const chartLoadPromise = loadMonthlyChart();
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/admin/weekly-profit?week_start=${week.start}`);
+        if (!response.ok) throw new Error('Failed to fetch profit data');
+        
+        const data = await response.json();
+        
+        // Update summary
+        document.getElementById('week-range').textContent = `${data.week_start_date} to ${data.week_end_date}`;
+        document.getElementById('total-revenue').textContent = data.total_revenue;
+        document.getElementById('total-expenses').textContent = data.total_expenses;
+        document.getElementById('net-profit').textContent = data.net_profit;
+        
+        // Display expenses
+        displayExpenses(data.daily_expenses || []);
+
+        // Ensure chart request finishes too
+        await chartLoadPromise;
+    } catch (error) {
+        console.error('Error loading profit data:', error);
+        alert('Error loading profit data');
+        await chartLoadPromise;
+    }
+}
+
+function displayExpenses(expenses) {
+    const container = document.getElementById('expenses-list');
+    
+    if (!expenses || expenses.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #999;">No expenses recorded for this week.</p>';
+        return;
+    }
+    
+    let html = '';
+    expenses.forEach(expense => {
+        html += `
+            <div style="padding: 10px; background: #f8f9fa; border-radius: 4px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <strong>${expense.expense_date}</strong> - ₹${expense.amount}
+                    ${expense.description ? `<br><small style="color: #666;">${expense.description}</small>` : ''}
+                </div>
+                <button class="btn-danger" onclick="deleteExpense('${expense.expense_date}')" style="padding: 4px 8px; font-size: 0.8rem;">Delete</button>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+async function saveExpense() {
+    const expenseDate = document.getElementById('expense-date').value;
+    const amount = parseInt(document.getElementById('expense-amount').value) || 0;
+    const description = document.getElementById('expense-description').value;
+    const saveBtn = event?.target;
+    
+    if (!expenseDate) {
+        alert('Please select an expense date');
+        return;
+    }
+    
+    if (amount <= 0) {
+        alert('Please enter a valid amount');
+        return;
+    }
+    
+    // Show loading state
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/admin/daily-expenses`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                expense_date: expenseDate,
+                amount: amount,
+                description: description || null
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            // Show visual feedback
+            const notification = document.createElement('div');
+            notification.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #2ecc71; color: white; padding: 15px 20px; border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: 10000; font-weight: bold;';
+            notification.textContent = `✅ Expense saved! ₹${amount} on ${expenseDate}`;
+            document.body.appendChild(notification);
+            setTimeout(() => notification.remove(), 3000);
+            
+            // Clear form
+            document.getElementById('expense-date').value = '';
+            document.getElementById('expense-amount').value = '';
+            document.getElementById('expense-description').value = '';
+            
+            // Refresh the display
+            await loadProfitData();
+        } else {
+            alert(`❌ Failed to save expense: ${data.detail || 'Unknown error'}`);
+        }
+    } catch (error) {
+        console.error('Error saving expense:', error);
+        alert(`❌ Error saving expense: ${error.message}`);
+    } finally {
+        // Reset button
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Expense';
+        }
+    }
+}
+
+async function deleteExpense(expenseDate) {
+    if (!confirm('Delete this expense?')) return;
+    
+    try {
+        // First, get the expense ID
+        const response = await fetch(`${API_BASE}/api/admin/daily-expenses?week_start=${expenseDate}`);
+        const expenses = await response.json();
+        const expense = expenses.find(e => e.expense_date === expenseDate);
+        
+        if (!expense) {
+            alert('Expense not found');
+            return;
+        }
+        
+        const deleteResponse = await fetch(`${API_BASE}/api/admin/daily-expenses/${expense.id}`, {
+            method: 'DELETE'
+        });
+        
+        if (deleteResponse.ok) {
+            await loadProfitData(); // Refresh the display
+        } else {
+            alert('Failed to delete expense');
+        }
+    } catch (error) {
+        console.error('Error deleting expense:', error);
+        alert('Error deleting expense');
+    }
+}
+
+let profitChart = null;
+
+function setMonthlyChartStatus(message = '', show = false, isError = false) {
+    const statusEl = document.getElementById('monthly-chart-status');
+    if (!statusEl) return;
+
+    statusEl.textContent = message;
+    statusEl.style.display = show ? 'block' : 'none';
+    statusEl.style.color = isError ? '#ffd2d2' : '#cbd5d6';
+    statusEl.style.background = isError ? 'rgba(231, 76, 60, 0.2)' : 'rgba(255, 255, 255, 0.08)';
+}
+
+async function loadMonthlyChart() {
+    setMonthlyChartStatus('Loading monthly chart...', true, false);
+
+    try {
+        // Let backend pick month/year from its own (possibly mocked) clock to avoid an extra API round-trip.
+        const response = await fetch(`${API_BASE}/api/admin/monthly-profit`);
+        if (!response.ok) throw new Error('Failed to fetch monthly data');
+        
+        const data = await response.json();
+        
+        console.log('Monthly profit data:', data);
+        
+        if (!data.weeks || data.weeks.length === 0) {
+            console.warn('No weeks data available');
+            const chartCanvas = document.getElementById('profit-chart');
+            if (chartCanvas) chartCanvas.style.display = 'none';
+            setMonthlyChartStatus('No monthly data available yet.', true, false);
+            return;
+        }
+
+        const chartCanvas = document.getElementById('profit-chart');
+        if (chartCanvas) chartCanvas.style.display = 'block';
+        setMonthlyChartStatus('', false, false);
+        
+        // Prepare chart data
+        const labels = data.weeks.map((w, i) => `Week ${i + 1}`);
+        const profitData = data.weeks.map(w => w.profit || 0);
+        const revenueData = data.weeks.map(w => w.revenue || 0);
+        const expenseData = data.weeks.map(w => w.expenses || 0);
+        
+        console.log('Chart labels:', labels);
+        console.log('Profit data:', profitData);
+        
+        renderProfitChart(labels, profitData, revenueData, expenseData);
+        setMonthlyChartStatus('', false, false);
+    } catch (error) {
+        console.error('Error loading monthly chart:', error);
+        const chartCanvas = document.getElementById('profit-chart');
+        if (chartCanvas) chartCanvas.style.display = 'none';
+        setMonthlyChartStatus('Failed to load monthly chart data.', true, true);
+    }
+}
+
+function renderProfitChart(labels, profitData, revenueData, expenseData) {
+    const canvas = document.getElementById('profit-chart');
+    if (!canvas) {
+        console.error('Canvas element not found');
+        return;
+    }
+    
+    // Check if Chart.js is available
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js not loaded');
+        return;
+    }
+    
+    // Destroy existing chart if it exists
+    if (profitChart) {
+        profitChart.destroy();
+    }
+    
+    const ctx = canvas.getContext('2d');
+    console.log('Creating chart with labels:', labels, 'data:', { profitData, revenueData, expenseData });
+    
+    profitChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Revenue',
+                    data: revenueData,
+                    backgroundColor: 'rgba(72, 201, 176, 0.78)',
+                    borderColor: '#48c9b0',
+                    borderWidth: 1.2,
+                    borderRadius: 8,
+                    borderSkipped: false,
+                    maxBarThickness: 34
+                },
+                {
+                    label: 'Expenses',
+                    data: expenseData,
+                    backgroundColor: 'rgba(255, 107, 107, 0.75)',
+                    borderColor: '#ff6b6b',
+                    borderWidth: 1.2,
+                    borderRadius: 8,
+                    borderSkipped: false,
+                    maxBarThickness: 34
+                },
+                {
+                    label: 'Net Profit',
+                    data: profitData,
+                    backgroundColor: '#f4d35e',
+                    borderColor: '#f4d35e',
+                    borderWidth: 1,
+                    type: 'line',
+                    borderWidth: 3,
+                    fill: false,
+                    pointBackgroundColor: '#1a1a1a',
+                    pointBorderColor: '#f4d35e',
+                    pointBorderWidth: 2.5,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    tension: 0.32
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                    align: 'start',
+                    labels: {
+                        color: '#e7ecef',
+                        usePointStyle: true,
+                        boxWidth: 10,
+                        boxHeight: 10,
+                        padding: 16,
+                        font: { size: 12, weight: '600' }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(12, 14, 17, 0.94)',
+                    borderColor: 'rgba(255, 255, 255, 0.15)',
+                    borderWidth: 1,
+                    padding: 12,
+                    titleColor: '#f5f7f8',
+                    bodyColor: '#dce3e6',
+                    displayColors: true,
+                    callbacks: {
+                        label(context) {
+                            const value = context.parsed.y ?? 0;
+                            return `${context.dataset.label}: Rs ${value.toLocaleString()}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: '#c6d0d4',
+                        maxTicksLimit: 6,
+                        callback(value) {
+                            return `Rs ${Number(value).toLocaleString()}`;
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.09)',
+                        drawBorder: false
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: '#d7dfe2',
+                        font: { weight: '600' }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.05)',
+                        drawBorder: false
+                    }
+                }
+            }
+        }
+    });
 }

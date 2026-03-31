@@ -168,11 +168,18 @@ def process_10am_breakfast_clear(db: Session):
     today = get_current_date()
     day_of_week = today.strftime('%A').lower()
 
+    cleared_count = 0
     for item in breakfast_items:
         stock = get_or_create_stock(db, item.id, day_of_week)
+        if stock.walkin_pool > 0 or stock.prebook_pool > 0:
+            cleared_count += 1
         stock.walkin_pool = 0
         stock.prebook_pool = 0
+    
+    # Mark logic as run for today in the database
+    db.add(models.LogicRun(logic_name='breakfast_10am_clear', last_run_date=today))
     db.commit()
+    print(f"✅ 10 AM breakfast stock clear complete. Cleared {cleared_count} items.")
 
 def process_2pm_lunch_clear(db: Session):
     """Clears all unsold lunch stock at the end of the lunch period."""
@@ -181,11 +188,18 @@ def process_2pm_lunch_clear(db: Session):
     today = get_current_date()
     day_of_week = today.strftime('%A').lower()
 
+    cleared_count = 0
     for item in lunch_items:
         stock = get_or_create_stock(db, item.id, day_of_week)
+        if stock.walkin_pool > 0 or stock.prebook_pool > 0:
+            cleared_count += 1
         stock.walkin_pool = 0
         stock.prebook_pool = 0
+    
+    # Mark logic as run for today in the database
+    db.add(models.LogicRun(logic_name='lunch_2pm_clear', last_run_date=today))
     db.commit()
+    print(f"✅ 2 PM lunch stock clear complete. Cleared {cleared_count} items.")
 
 def process_expired_orders(db: Session, now: datetime.datetime):
     """Finds confirmed orders that missed their 30-min window and moves items to walk-in."""
@@ -197,6 +211,9 @@ def process_expired_orders(db: Session, now: datetime.datetime):
         models.Booking.status == 'confirmed'
     ).all()
     
+    expired_count = 0
+    flagged_users = []
+    
     for booking in bookings:
         if not booking.scheduled_slot:
             continue
@@ -207,8 +224,17 @@ def process_expired_orders(db: Session, now: datetime.datetime):
             expiry_dt = datetime.datetime.combine(today, slot_time) + datetime.timedelta(minutes=30)
             
             if now >= expiry_dt:
-                print(f"🕒 Booking {booking.id} expired! Moving items to walk-in.")
+                expired_count += 1
                 booking.status = 'no-show'
+
+                # Flag the user
+                user = db.query(models.User).filter(models.User.admission_no == booking.user_id).first()
+                if user:
+                    if user.flags < 5:
+                        user.flags += 1
+                    user.flagged_at = now
+                    flagged_users.append((user.admission_no, user.flags))
+
                 day_of_week = today.strftime('%A').lower()
                 
                 for booked_item in booking.items:
@@ -219,6 +245,13 @@ def process_expired_orders(db: Session, now: datetime.datetime):
                     db.delete(seat_reservation)
         except Exception as e:
             print(f"[ERROR] Failed to process expiry for booking {booking.id}: {e}")
+    
+    # Print summary instead of individual messages
+    if expired_count > 0:
+        print(f"🕒 {expired_count} booking(s) expired and moved to walk-in.")
+        if flagged_users:
+            print(f"   Flagged {len(flagged_users)} user(s): {', '.join([f'{u[0]} ({u[1]} flags)' for u in flagged_users])}")
+    
     db.commit()
 
 # A data structure to define our time-based triggers in a clear, extensible way.
