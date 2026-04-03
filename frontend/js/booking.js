@@ -906,11 +906,18 @@ function renderMenu() {
     const mainPageContainer = document.getElementById('menu-container');
     const slotInput = document.getElementById('time-slot');
     const slot = slotInput ? slotInput.value : "";
+    const vegFilter = document.getElementById('veg-filter')?.value || 'all';
 
     console.log('Rendering menuItems:', menuItems);
     const filteredItems = menuItems.filter(item => {
         if (currentMealType === 'snack') return item.category === 'snack';
-        return item.meal_type === currentMealType;
+        const matchesMealType = item.meal_type === currentMealType;
+        if (!matchesMealType) return false;
+
+        const isVeg = item.is_veg !== false;
+        if (vegFilter === 'veg') return isVeg;
+        if (vegFilter === 'non-veg') return !isVeg;
+        return true;
     });
     console.log('Filtered menuItems:', filteredItems);
 
@@ -948,6 +955,7 @@ function renderMenu() {
                     ${item.image_url ? `<img src="${item.image_url}" alt="${item.name}" style="width: 100%; height: 120px; object-fit: cover; border-radius: 6px; cursor: pointer; margin-bottom: 10px;" onclick='showFoodInfo(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})'>` : ''}
                     <h3>${item.name} <button onclick='showFoodInfo(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})' style="background:none; border:none; cursor:pointer; color:#3498db; padding: 0; font-size: 1.1rem;" title="View Info">ℹ️</button></h3>
                     <p class="price">₹${item.price_full}</p>
+                    <p class="item-category">${item.is_veg === false ? 'Non-veg' : 'Veg'}</p>
                     ${planBtn}
                     ${infoMsg}
                 `;
@@ -997,7 +1005,7 @@ function renderMenu() {
                     row.innerHTML = `
                         <div class="item-details">
                             <span class="item-name">${item.name} <button onclick='showFoodInfo(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})' style="background:none; border:none; cursor:pointer; color:#3498db; padding: 0; margin-right: 5px;" title="View Info">ℹ️</button>(₹${item.price_full})</span>
-                            <span class="item-meta">${item.category}</span>
+                            <span class="item-meta">${item.category} | ${item.is_veg === false ? 'Non-veg' : 'Veg'}</span>
                         </div>
                         <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})' ${isItemDisabled ? 'style="background-color: #ccc; cursor: not-allowed;"' : ''}>+</button>
                     `;
@@ -1382,6 +1390,8 @@ function completeDummyPayment() {
 
 async function processBooking() {
     const dropPointEl = document.getElementById('parcel-drop-point');
+    const parcelCountEl = document.getElementById('parcel-count');
+    const groupSize = parcelCountEl ? (parseInt(parcelCountEl.value, 10) || 1) : 1;
     const payload = {
         admission_no: localStorage.getItem("admission_no"),
         items: cart.map(cartItem => ({
@@ -1391,6 +1401,7 @@ async function processBooking() {
         scheduled_slot: document.getElementById('time-slot').value,
         order_type: document.getElementById('order-type').value,
         drop_point: dropPointEl ? dropPointEl.value : null,
+        group_size: groupSize,
         booking_date: selectedDate,
         seat_ids: selectedSeatIds
     };

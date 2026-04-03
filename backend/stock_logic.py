@@ -6,6 +6,64 @@ from .time_logic import get_current_date
 # Track if 1am/7am logic has run for today
 import datetime
 
+
+def _calculate_predicted_buffer(db: Session, food_item_id: int, meal_type: str, target_date: datetime.date, live_preorders: int) -> int:
+    """Predict extra stock using last 3 weeks and, for special days, past special-day demand."""
+    from_date = target_date - datetime.timedelta(days=21)
+
+    daily_qty_rows = db.query(
+        models.Booking.booking_date,
+        func.coalesce(func.sum(models.BookedItem.quantity), 0)
+    ).join(
+        models.BookedItem, models.BookedItem.booking_id == models.Booking.id
+    ).join(
+        models.FoodItem, models.FoodItem.id == models.BookedItem.food_item_id
+    ).filter(
+        models.BookedItem.food_item_id == food_item_id,
+        models.Booking.booking_date >= from_date,
+        models.Booking.booking_date < target_date,
+        models.Booking.status != 'cancelled',
+        models.FoodItem.meal_type == meal_type
+    ).group_by(models.Booking.booking_date).all()
+
+    regular_avg = 0
+    if daily_qty_rows:
+        regular_avg = sum(int(r[1] or 0) for r in daily_qty_rows) / len(daily_qty_rows)
+
+    special_day = db.query(models.Holiday).filter(
+        models.Holiday.date == target_date,
+        models.Holiday.day_type == 'special'
+    ).first()
+
+    special_avg = 0
+    if special_day:
+        past_special_dates = db.query(models.Holiday.date).filter(
+            models.Holiday.day_type == 'special',
+            models.Holiday.date < target_date
+        ).order_by(models.Holiday.date.desc()).limit(8).all()
+        past_dates = [d[0] for d in past_special_dates]
+
+        if past_dates:
+            special_rows = db.query(
+                models.Booking.booking_date,
+                func.coalesce(func.sum(models.BookedItem.quantity), 0)
+            ).join(
+                models.BookedItem, models.BookedItem.booking_id == models.Booking.id
+            ).join(
+                models.FoodItem, models.FoodItem.id == models.BookedItem.food_item_id
+            ).filter(
+                models.BookedItem.food_item_id == food_item_id,
+                models.Booking.booking_date.in_(past_dates),
+                models.Booking.status != 'cancelled',
+                models.FoodItem.meal_type == meal_type
+            ).group_by(models.Booking.booking_date).all()
+            if special_rows:
+                special_avg = sum(int(r[1] or 0) for r in special_rows) / len(special_rows)
+
+    blended_prediction = regular_avg if not special_avg else (0.6 * regular_avg + 0.4 * special_avg)
+    predicted_total = max(live_preorders, int(round(blended_prediction)))
+    return max(0, predicted_total - live_preorders)
+
 def process_1am_lunch_recalc(db: Session):
     """
     Recalculates lunch stock based on pre-orders before 1 AM.
@@ -27,8 +85,10 @@ def process_1am_lunch_recalc(db: Session):
         # The base stock is now a live counter. We just read it.
         pre_order_count = stock.admin_base_stock
         print(f"Item '{item.name}' (ID: {item.id}) has {pre_order_count} pre-orders.")
-        # Calculate the 20% buffer based on pre-orders
-        buffer = int(pre_order_count * 0.20)
+        # Calculate buffer using max of fixed-ratio and predicted demand uplift.
+        ratio_buffer = int(pre_order_count * 0.20)
+        predicted_buffer = _calculate_predicted_buffer(db, item.id, 'lunch', today, pre_order_count)
+        buffer = max(ratio_buffer, predicted_buffer)
         # Buffer split: 10% for late pre-book (1am-11am), 10% for walk-in
         prebook_buffer = buffer // 2
         walkin_buffer = buffer - prebook_buffer
@@ -106,7 +166,9 @@ def process_5pm_breakfast_recalc(db: Session):
         pre_order_count = stock.admin_base_stock
         print(f"Item '{item.name}' (ID: {item.id}) has {pre_order_count} pre-orders for tomorrow.")
 
-        buffer = int(pre_order_count * 0.20)
+        ratio_buffer = int(pre_order_count * 0.20)
+        predicted_buffer = _calculate_predicted_buffer(db, item.id, 'breakfast', target_date, pre_order_count)
+        buffer = max(ratio_buffer, predicted_buffer)
         prebook_buffer = buffer // 2
         walkin_buffer = buffer - prebook_buffer
 
@@ -285,7 +347,10 @@ def is_working_day(target_date: datetime.date, db: Session) -> bool:
     """Check if a date is a working day (not a weekend and not a holiday)."""
     if target_date.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
         return False
-    holiday = db.query(models.Holiday).filter(models.Holiday.date == target_date).first()
+    holiday = db.query(models.Holiday).filter(
+        models.Holiday.date == target_date,
+        models.Holiday.day_type == 'holiday'
+    ).first()
     if holiday:
         return False
     return True

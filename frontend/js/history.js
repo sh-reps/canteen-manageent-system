@@ -8,6 +8,7 @@ function generateOrderRow(order) {
     const seatNumbers = (order.booked_seats && order.booked_seats.length > 0) 
         ? order.booked_seats.map(s => `T${s.seat.table_number}-S${s.seat.seat_number}`).join(", ")
         : `Parcel${order.drop_point ? ` (${order.drop_point.toUpperCase()})` : ''}`;
+    const deliveryInfo = order.delivery_window ? `<div style="font-size:0.8rem; color:#2ecc71;">Delivery: ${order.delivery_window}</div>` : '';
     
     // Show cancel button only for 'confirmed' orders. The backend will validate the time.
     const actionButton = order.status === 'confirmed'
@@ -20,7 +21,7 @@ function generateOrderRow(order) {
             <td>${orderDate}</td>
             <td>${order.scheduled_slot}</td>
             <td>${foodItems}</td>
-            <td>${seatNumbers}</td> 
+            <td>${seatNumbers}${deliveryInfo}</td> 
             <td><span class="status-${order.status}">${order.status}</span></td>
             <td>${actionButton}</td>
         </tr>`;

@@ -6,6 +6,7 @@
     <title>Canteen - User Dashboard</title>
     <link rel="stylesheet" href="/css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 </head>
 <body class="admin-layout">
 
@@ -33,6 +34,12 @@
             </li>
             <li id="user-nav-notifications" onclick="showUserSection('notifications')" class="nav-item">
                 <i class="fas fa-bell"></i> Notifications
+            </li>
+            <li id="user-nav-flags" onclick="showUserSection('flags')" class="nav-item">
+                <i class="fas fa-flag"></i> Flag Status
+            </li>
+            <li id="user-nav-incentives" onclick="showUserSection('incentives')" class="nav-item">
+                <i class="fas fa-award"></i> Incentives
             </li>
         </ul>
         <div class="sidebar-footer">
@@ -127,6 +134,22 @@
             </div>
             <div id="notification-list"></div>
         </section>
+
+        <section id="user-section-flags" class="admin-section" style="display:none;">
+            <div class="section-header">
+                <h2>Flag & Deposit Status</h2>
+                <button class="btn-action" onclick="loadFlagSummary()"><i class="fas fa-sync"></i> Refresh</button>
+            </div>
+            <div id="flag-summary-card" class="menu-item-card"></div>
+        </section>
+
+        <section id="user-section-incentives" class="admin-section" style="display:none;">
+            <div class="section-header">
+                <h2>Incentives</h2>
+                <button class="btn-action" onclick="loadIncentivesSummary()"><i class="fas fa-sync"></i> Refresh</button>
+            </div>
+            <div id="incentives-summary-card" class="menu-item-card"></div>
+        </section>
     </main>
 
     <div id="floating-cart" onclick="openCartModal()">
@@ -186,6 +209,14 @@
 
             <div id="food-selection-area" class="locked-section">
                 <h4>Add Food (Limit: <span id="max-items">0</span>)</h4>
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label>Filter by Type</label>
+                    <select id="veg-filter" onchange="renderMenu()">
+                        <option value="all">All</option>
+                        <option value="veg">Veg</option>
+                        <option value="non-veg">Non-veg</option>
+                    </select>
+                </div>
                 <div id="cart-items-container" class="scroll-menu"></div>
 
                 <div class="summary-box">
@@ -241,6 +272,23 @@
             <div class="btn-group" style="display: flex; gap: 10px; margin-top: 15px;">
                 <button id="half-btn" class="btn-action">Half Portion</button>
                 <button id="full-btn" class="btn-confirm">Full Portion</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="barcode-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content booking-card" style="max-width:520px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-barcode"></i> Order Barcode</h2>
+                <span class="close-x" onclick="closeBarcodeModal()">&times;</span>
+            </div>
+            <div id="barcode-order-info" class="menu-item-card" style="margin-bottom: 15px;"></div>
+            <div style="display:flex; justify-content:center; padding: 10px 0; overflow:auto;">
+                <svg id="order-barcode-svg"></svg>
+            </div>
+            <p id="barcode-order-hint" class="item-category" style="text-align:center; margin-top: 10px;"></p>
+            <div class="btn-group" style="margin-top: 15px;">
+                <button class="btn-action" onclick="closeBarcodeModal()">Close</button>
             </div>
         </div>
     </div>

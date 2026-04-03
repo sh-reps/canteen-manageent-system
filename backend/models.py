@@ -28,6 +28,7 @@ class FoodItem(Base):
     has_portions = Column(Boolean, default=True)
     is_walkin_only = Column(Boolean, default=False) # For Snacks
     is_countable = Column(Boolean, default=False)
+    is_veg = Column(Boolean, default=True)
     
     # Template fields used when initializing a new day's stock
     admin_base_stock = Column(Integer, default=0)
@@ -63,6 +64,7 @@ class Booking(Base):
     scheduled_slot = Column(String, nullable=False)
     order_type = Column(String) # 'sit-in' or 'parcel'
     drop_point = Column(String, nullable=True)
+    group_size = Column(Integer, default=1)
     status = Column(String, default="confirmed")
     items = relationship("BookedItem", back_populates="booking")
     booked_seats = relationship("SeatReservation", back_populates="booking")
@@ -102,6 +104,8 @@ class Holiday(Base):
     __tablename__ = "holidays"
     id = Column(Integer, primary_key=True, index=True)
     date = Column(Date, unique=True, nullable=False)
+    day_type = Column(String, default='holiday', nullable=False)  # holiday | special
+    label = Column(String, nullable=True)
 
 class LogicRun(Base):
     __tablename__ = 'logic_runs'
