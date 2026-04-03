@@ -1,4 +1,4 @@
-var API_BASE = "http://127.0.0.1:8000";
+var API_BASE = "";
 const DEBUG_NAV_PREF_KEY = 'admin_debug_nav_enabled';
 let cashierScannerStream = null;
 let cashierScannerActive = false;

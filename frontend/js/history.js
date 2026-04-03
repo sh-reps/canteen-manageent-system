@@ -81,7 +81,7 @@ async function loadHistory() {
     pastTbody.innerHTML = '<tr><td colspan="7" class="text-center">Loading...</td></tr>';
 
     try {
-        const response = await fetch(`http://127.0.0.1:8000/order-history/${admissionNo}`);
+        const response = await fetch(`/order-history/${admissionNo}`);
 
         if (!response.ok) {
             const text = await response.text();
@@ -141,7 +141,7 @@ async function cancelOrder(orderId) {
     }
     
     try {
-        const response = await fetch(`http://127.0.0.1:8000/bookings/${orderId}/cancel`, {
+        const response = await fetch(`/bookings/${orderId}/cancel`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });

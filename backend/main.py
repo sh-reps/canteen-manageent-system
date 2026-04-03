@@ -481,13 +481,14 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
 
 @app.post("/register", status_code=status.HTTP_201_CREATED)
 def register_user(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
-    exists = db.query(models.User).filter(models.User.admission_no == user_data.admission_no).first()
+    admission_no = user_data.admission_no.strip()
+    exists = db.query(models.User).filter(models.User.admission_no == admission_no).first()
     if exists:
         raise HTTPException(status_code=400, detail="Admission number already registered")
     
     hashed_password = get_password_hash(user_data.password)
     new_user = models.User(
-        admission_no=user_data.admission_no, 
+        admission_no=admission_no,
         password=hashed_password,
         email=user_data.email,
         role=user_data.role # Assign the role from the request
@@ -498,8 +499,9 @@ def register_user(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/login")
 def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
+    admission_no = user_data.admission_no.strip()
     user = db.query(models.User).filter(
-        models.User.admission_no == user_data.admission_no
+        models.User.admission_no == admission_no
     ).first()
     
     if not user or not verify_password(user_data.password, user.password):
@@ -513,7 +515,8 @@ def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
 
 @app.post("/api/forgot-password")
 async def forgot_password(req: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.admission_no == req.admission_no).first()
+    admission_no = req.admission_no.strip()
+    user = db.query(models.User).filter(models.User.admission_no == admission_no).first()
     
     # To prevent user enumeration, always return a generic success message.
     # The email is only sent if the user and email actually exist.
@@ -528,7 +531,8 @@ async def forgot_password(req: schemas.ForgotPasswordRequest, db: Session = Depe
         user.reset_token_expiry = datetime.utcnow() + timedelta(hours=1)
         db.commit()
 
-        reset_link = f"http://127.0.0.1:8000/reset-password?token={token}"
+        app_base_url = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+        reset_link = f"{app_base_url}/reset-password?token={token}"
         html_body = f"""
         <p>Hello,</p>
         <p>You requested a password reset. Click the link below to reset your password (valid for 1 hour):</p>

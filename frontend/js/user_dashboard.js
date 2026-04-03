@@ -1,4 +1,4 @@
-const USER_API_BASE = 'http://127.0.0.1:8000';
+const USER_API_BASE = '';
 
 function showUserSection(sectionId) {
     document.querySelectorAll('[id^="user-section-"]').forEach(sec => {

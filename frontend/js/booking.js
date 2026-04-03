@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function fetchLogicStatus() {
     try {
-        const res = await fetch('http://127.0.0.1:8000/stock-logic-status');
+        const res = await fetch('/stock-logic-status');
         if (res.ok) {
             logicStatus = await res.json();
         }
@@ -175,7 +175,7 @@ window.showFoodInfo = function(item) {
 
 async function loadFoodReviews(foodId) {
     try {
-        const response = await fetch(`http://127.0.0.1:8000/api/reviews/food/${foodId}`);
+        const response = await fetch(`/api/reviews/food/${foodId}`);
         const data = await response.json();
         
         const reviewsSection = document.getElementById(`reviews-section-${foodId}`);
@@ -274,7 +274,7 @@ async function submitReview(foodId) {
     }
     
     try {
-        const response = await fetch('http://127.0.0.1:8000/api/reviews', {
+        const response = await fetch('/api/reviews', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ admission_no, food_id: foodId, rating, review_text })
@@ -301,7 +301,7 @@ async function deleteReview(reviewId, foodId) {
     const admission_no = localStorage.getItem('admission_no');
     
     try {
-        const response = await fetch(`http://127.0.0.1:8000/api/reviews/${reviewId}?admission_no=${admission_no}`, {
+        const response = await fetch(`/api/reviews/${reviewId}?admission_no=${admission_no}`, {
             method: 'DELETE'
         });
         
@@ -458,7 +458,7 @@ async function initializeDatePicker() {
         // Force a 2.5 second timeout so a bad server connection doesn't freeze the UI forever
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2500);
-        const response = await fetch('http://127.0.0.1:8000/api/holidays', { signal: controller.signal });
+        const response = await fetch('/api/holidays', { signal: controller.signal });
         clearTimeout(timeoutId);
         
         if (response.ok) {
@@ -828,7 +828,7 @@ async function refreshSeatList() {
 
     grid.innerHTML = "Loading...";
     try {
-        const response = await fetch(`http://127.0.0.1:8000/available-seats/${section}/${slot}/${selectedDate}`);
+        const response = await fetch(`/available-seats/${section}/${slot}/${selectedDate}`);
         const seats = await response.json();
 
         grid.innerHTML = ""; 
@@ -886,7 +886,7 @@ async function fetchMenu() {
         
         dayParam = targetDateForFetch.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
 
-        let url = 'http://127.0.0.1:8000/food-items';
+        let url = '/food-items';
         if (dayParam) {
             url += `?day=${dayParam}`;
         }
@@ -1277,7 +1277,7 @@ async function getCurrentUserFlags() {
     if (!admissionNo) return 0;
 
     try {
-        const response = await fetch(`http://127.0.0.1:8000/users/${admissionNo}/flags`);
+        const response = await fetch(`/users/${admissionNo}/flags`);
         if (!response.ok) return 0;
 
         const data = await response.json();
@@ -1342,7 +1342,7 @@ async function checkSlotAvailability() {
     const type = document.getElementById('order-type').value;
 
     if (type === 'parcel' && slot && selectedDate) {
-        const response = await fetch(`http://127.0.0.1:8000/check-capacity/${slot}/${selectedDate}`);
+        const response = await fetch(`/check-capacity/${slot}/${selectedDate}`);
         const data = await response.json();
         
         if (data.remaining <= 0) {
@@ -1406,7 +1406,7 @@ async function processBooking() {
         seat_ids: selectedSeatIds
     };
 
-    const response = await fetch('http://127.0.0.1:8000/book-multiple', {
+    const response = await fetch('/book-multiple', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

@@ -5,12 +5,12 @@ function logout() {
 }
 // login.js - Ensure this is at the top level
 async function login() {
-    const admission_no = document.getElementById('admission_no').value;
+    const admission_no = document.getElementById('admission_no').value.trim();
     const password = document.getElementById('password').value;
     const errorMsg = document.getElementById('error-message');
 
     try {
-        const response = await fetch('http://127.0.0.1:8000/login', {
+        const response = await fetch('/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ admission_no, password })

@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const admissionNo = event.target.dataset.admissionNo;
             if (confirm(`Are you sure you want to reset flags for user ${admissionNo}?`)) {
                 try {
-                    const response = await fetch(`http://127.0.0.1:8000/api/admin/reset-flags/${admissionNo}`, {
+                    const response = await fetch(`/api/admin/reset-flags/${admissionNo}`, {
                         method: 'POST',
                     });
                     if (!response.ok) {
@@ -36,7 +36,7 @@ function calculateDepositPercentage(flags) {
 
 async function fetchFlaggedUsers() {
     try {
-        const response = await fetch('http://127.0.0.1:8000/api/admin/flagged-users');
+        const response = await fetch('/api/admin/flagged-users');
         if (!response.ok) {
             throw new Error('Failed to fetch flagged users');
         }
