@@ -2,10 +2,11 @@ import argparse
 import sys
 from getpass import getpass
 
+from dotenv import load_dotenv
 from passlib.context import CryptContext
 
-from backend.database import SessionLocal
-from backend.models import User
+
+load_dotenv()
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -22,9 +23,19 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
+def get_user(db, identifier: str):
+    from backend.models import User
+
+    normalized_identifier = identifier.strip()
+    user = db.query(User).filter(User.admission_no == normalized_identifier).first()
+    if user is None and normalized_identifier.lower() == "admin":
+        user = db.query(User).filter(User.role == "admin").first()
+    return user
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Change a user's password in the database.")
-    parser.add_argument("admission_no", help="User admission number")
+    parser.add_argument("admission_no", help="User admission number or admin identifier")
     parser.add_argument(
         "new_password",
         nargs="?",
@@ -40,9 +51,11 @@ def main() -> int:
         print(f"Error: {exc}")
         return 1
 
+    from backend.database import SessionLocal
+
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.admission_no == args.admission_no).first()
+        user = get_user(db, args.admission_no)
         if user is None:
             print(f"User not found: {args.admission_no}")
             return 1
