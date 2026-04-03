@@ -15,6 +15,7 @@ let selectedDate = null; // To store the selected booking date
 let currentViewMode = 'pre-order';
 let currentMealType = 'breakfast';
 const SIT_IN_SLOTS = ["12:00:00", "12:25:00", "12:50:00", "13:15:00"]; // Match backend format
+let cachedUserFlags = null;
 
 // ==========================================
 // 2. INITIALIZATION (On Page Load)
@@ -52,7 +53,8 @@ window.showFoodInfo = function(item) {
 
     // --- Conditionally build the stock information block ---
     let stockHtml = '';
-    const today = getSimulatedDate();
+    const now = getSimulatedDate();
+    const today = new Date(now);
     today.setHours(0,0,0,0);
     
     // If no date is selected yet (viewing from main menu), smartly default to the relevant date
@@ -76,14 +78,14 @@ window.showFoodInfo = function(item) {
     let isOver = false;
     let overMessage = "";
     if (isToday) {
-        const currentHour = today.getHours();
-        const currentMins = today.getMinutes();
+        const currentHour = now.getHours();
+        const currentMins = now.getMinutes();
         if (currentMealType === 'breakfast' && (currentHour > 9 || (currentHour === 9 && currentMins >= 30))) {
             isOver = true;
-            overMessage = "Breakfast service has ended for today.";
+            overMessage = "Breakfast over for today.";
         } else if (currentMealType === 'lunch' && currentHour >= 14) {
             isOver = true;
-            overMessage = "Lunch service has ended for today.";
+            overMessage = "Lunch over for today.";
         }
     }
 
@@ -103,7 +105,7 @@ window.showFoodInfo = function(item) {
         }
     } else if (currentViewMode === 'walk-in') {
         stockPoolName = 'Walk-in';
-        if (currentMealType === 'lunch' && isToday && logicStatus.lunch_11am) {
+        if (currentMealType === 'lunch' && isToday) {
             showStock = true;
             stockCount = item.walkin_pool;
         } else if (currentMealType === 'breakfast') {
@@ -697,11 +699,13 @@ function resetAndLock() {
     const capacitySection = document.getElementById('capacity-section');
     const sitInConfig = document.getElementById('sit-in-config');
     const parcelConfig = document.getElementById('parcel-config');
+    const parcelDropPoint = document.getElementById('parcel-drop-point');
 
     // Reset state
     cart = [];
     selectedSeatIds = [];
     allowedFoodCount = 0;
+    if (parcelDropPoint) parcelDropPoint.value = '';
 
     if (timeSlotPicker) {
         timeSlotPicker.innerHTML = '<option value="">Choose Time...</option>';
@@ -1239,6 +1243,58 @@ function addToCart(item, quantity, portion, price) {
     validateFinalButton();
 }
 
+function getCartTotal() {
+    return cart.reduce((sum, cartItem) => sum + (cartItem.price * cartItem.quantity), 0);
+}
+
+function updateCartTotalDisplay() {
+    const totalEl = document.getElementById('total-val');
+    if (!totalEl) return;
+    totalEl.innerText = getCartTotal().toFixed(2);
+}
+
+function calculateDepositPercentageFromFlags(flags) {
+    if (flags === 0) return 10;
+    if (flags === 1) return 10;
+    if (flags === 2) return 30;
+    if (flags === 3) return 50;
+    if (flags === 4) return 75;
+    return 100;
+}
+
+async function getCurrentUserFlags() {
+    if (cachedUserFlags !== null) return cachedUserFlags;
+
+    const admissionNo = localStorage.getItem('admission_no');
+    if (!admissionNo) return 0;
+
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/users/${admissionNo}/flags`);
+        if (!response.ok) return 0;
+
+        const data = await response.json();
+        cachedUserFlags = Number.isFinite(data.flags) ? data.flags : 0;
+        return cachedUserFlags;
+    } catch (error) {
+        console.error('Failed to fetch user flags:', error);
+        return 0;
+    }
+}
+
+async function updatePaymentPreview() {
+    const amountEl = document.getElementById('payment-amount');
+    const percentageEl = document.getElementById('payment-deposit-percentage');
+    if (!amountEl || !percentageEl) return;
+
+    const total = getCartTotal();
+    const flags = await getCurrentUserFlags();
+    const depositPercentage = calculateDepositPercentageFromFlags(flags);
+    const depositAmount = (total * depositPercentage) / 100;
+
+    percentageEl.innerText = String(depositPercentage);
+    amountEl.innerText = depositAmount.toFixed(2);
+}
+
 function renderCart() {
     const list = document.getElementById('cart-summary-list');
     if (!list) return;
@@ -1259,6 +1315,8 @@ function renderCart() {
                     </div>
                 </li>`;
     }).join('');
+
+    updateCartTotalDisplay();
 }
 
 function removeFromCart(cartId) {
@@ -1291,16 +1349,22 @@ function validateFinalButton() {
     const confirmBtn = document.getElementById('final-confirm');
     const type = document.getElementById('order-type').value;
     const slot = document.getElementById('time-slot').value;
+    const dropPointEl = document.getElementById('parcel-drop-point');
+    const dropPoint = dropPointEl ? dropPointEl.value : '';
     const mealCount = cart.filter(i => i.item.category === 'meal').reduce((sum, i) => sum + (i.item.is_countable ? 1 : i.quantity), 0);
     // New Rule: The number of main meals must exactly match the number of seats/parcels selected.
     let isReady = (slot !== "" && type !== "" && mealCount > 0 && mealCount === allowedFoodCount && allowedFoodCount > 0);
+    if (type === 'parcel') {
+        isReady = isReady && dropPoint !== '';
+    }
     confirmBtn.disabled = !isReady;
 }
 
 
-function onConfirmAndPay() {
+async function onConfirmAndPay() {
     // Only require payment for pre-order bookings
     if (currentViewMode === 'pre-order') {
+        await updatePaymentPreview();
         document.getElementById('payment-modal').style.display = 'flex';
     } else {
         processBooking();
@@ -1317,6 +1381,7 @@ function completeDummyPayment() {
 }
 
 async function processBooking() {
+    const dropPointEl = document.getElementById('parcel-drop-point');
     const payload = {
         admission_no: localStorage.getItem("admission_no"),
         items: cart.map(cartItem => ({
@@ -1325,6 +1390,7 @@ async function processBooking() {
         })),
         scheduled_slot: document.getElementById('time-slot').value,
         order_type: document.getElementById('order-type').value,
+        drop_point: dropPointEl ? dropPointEl.value : null,
         booking_date: selectedDate,
         seat_ids: selectedSeatIds
     };

@@ -1,0 +1,96 @@
+// Connected schema only (excludes standalone tables)
+// Source: backend/models.py
+
+Table users {
+  admission_no varchar [pk]
+  password varchar
+  role varchar
+  email varchar
+  reset_token varchar
+  reset_token_expiry datetime
+  flags int
+  flagged_at datetime
+}
+
+Table food_items {
+  id int [pk]
+  name varchar
+  description text
+  image_url varchar
+  price_full int
+  price_half int
+  category varchar
+  meal_type varchar
+  has_portions boolean
+  is_walkin_only boolean
+  is_countable boolean
+  admin_base_stock int
+  prebook_pool int
+  walkin_pool int
+  breakfast_buffer int
+}
+
+Table bookings {
+  id int [pk]
+  user_id varchar [not null, ref: > users.admission_no]
+  booking_date date
+  created_at datetime
+  scheduled_slot varchar [not null]
+  order_type varchar
+  status varchar
+}
+
+Table booked_items {
+  id int [pk]
+  booking_id int [ref: > bookings.id]
+  food_item_id int [ref: > food_items.id]
+  quantity int [not null]
+}
+
+Table seats {
+  id int [pk]
+  table_number int
+  seat_number int
+  section varchar [not null]
+}
+
+Table seat_reservations {
+  id int [pk]
+  seat_id int [ref: > seats.id]
+  booking_id int [ref: > bookings.id]
+  time_slot varchar
+  reservation_date date
+
+  Indexes {
+    (seat_id, time_slot, reservation_date) [unique, name: "_seat_slot_date_uc"]
+  }
+}
+
+Table food_stocks {
+  id int [pk]
+  food_item_id int [ref: > food_items.id]
+  day_of_week varchar
+  admin_base_stock int
+  prebook_pool int
+  walkin_pool int
+  breakfast_buffer int
+}
+
+Table food_reviews {
+  id int [pk]
+  food_item_id int [not null, ref: > food_items.id]
+  user_id varchar [not null, ref: > users.admission_no]
+  rating int [not null]
+  review_text text
+  created_at datetime
+}
+
+// Foreign key relationships (explicit)
+Ref: bookings.user_id > users.admission_no
+Ref: booked_items.booking_id > bookings.id
+Ref: booked_items.food_item_id > food_items.id
+Ref: seat_reservations.seat_id > seats.id
+Ref: seat_reservations.booking_id > bookings.id
+Ref: food_stocks.food_item_id > food_items.id
+Ref: food_reviews.food_item_id > food_items.id
+Ref: food_reviews.user_id > users.admission_no

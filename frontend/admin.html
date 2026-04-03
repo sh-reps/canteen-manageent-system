@@ -43,6 +43,12 @@
             <li id="nav-profits" onclick="showSection('profits')" class="nav-item">
                 <i class="fas fa-chart-line"></i> Profits
             </li>
+            <li id="nav-feedback" onclick="showSection('feedback')" class="nav-item">
+                <i class="fas fa-comment-dots"></i> Suggestions & Complaints
+            </li>
+            <li id="nav-notifications" onclick="showSection('notifications')" class="nav-item">
+                <i class="fas fa-bell"></i> Notifications
+            </li>
         </ul>
         <div class="sidebar-footer">
             <button id="debug-toggle-btn" class="debug-toggle-btn" onclick="toggleDebugNav()" type="button" aria-pressed="true">
@@ -170,6 +176,7 @@
                     <p>Generate 200 random mixed (breakfast & lunch) orders for testing.</p>
                     <div class="form-group">
                         <input type="date" id="seed-date">
+                        <input type="number" id="seed-count" min="1" max="2000" value="200" placeholder="Number of orders">
                     </div>
                     <button onclick="seedFakeOrders()" class="btn-confirm">Generate Orders</button>
                     <button class="btn-danger" onclick="clearFakeOrders()">Clear All Orders</button>
@@ -231,11 +238,68 @@
                 <div class="booking-card profit-chart-card" style="grid-column: 2; min-height: 500px;">
                     <div class="profit-chart-head">
                         <h3>Monthly Profit Chart</h3>
+                        <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px; flex-wrap:wrap;">
+                            <button class="btn-action" type="button" onclick="shiftMonthlyChart(-1)">Previous Month</button>
+                            <input type="month" id="monthly-chart-month" onchange="onMonthlyChartMonthChange()">
+                            <button class="btn-action" type="button" onclick="shiftMonthlyChart(1)">Next Month</button>
+                        </div>
                         <p id="monthly-chart-status" class="monthly-chart-status" style="display: none;"></p>
                     </div>
                     <div class="profit-chart-wrap">
                         <canvas id="profit-chart"></canvas>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="section-feedback" class="admin-section" style="display:none;">
+            <div class="section-header">
+                <h2>Suggestions & Complaints</h2>
+                <button class="btn-action" onclick="loadAdminFeedback()">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>User</th>
+                        <th>Type</th>
+                        <th>Subject</th>
+                        <th>Message</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="admin-feedback-body"></tbody>
+            </table>
+        </section>
+
+        <section id="section-notifications" class="admin-section" style="display:none;">
+            <div class="section-header">
+                <h2>Notification Center</h2>
+            </div>
+            <div class="holiday-container">
+                <div class="booking-card">
+                    <h3>Send Notification</h3>
+                    <div class="form-group">
+                        <label>Target</label>
+                        <select id="notify-target" onchange="toggleNotificationTarget()">
+                            <option value="global">Global (All Users)</option>
+                            <option value="personal">Personal (Single User)</option>
+                        </select>
+                        <label id="notify-user-label" style="display:none;">User Admission No</label>
+                        <input type="text" id="notify-user-id" placeholder="2024CS101" style="display:none;">
+                        <label>Title</label>
+                        <input type="text" id="notify-title" placeholder="Enter notification title">
+                        <label>Message</label>
+                        <textarea id="notify-message" rows="4" placeholder="Enter notification message"></textarea>
+                        <button onclick="sendNotification()" class="btn-confirm">Send Notification</button>
+                    </div>
+                </div>
+                <div class="booking-card">
+                    <h3>Sent Notifications</h3>
+                    <div id="admin-notification-list"></div>
                 </div>
             </div>
         </section>

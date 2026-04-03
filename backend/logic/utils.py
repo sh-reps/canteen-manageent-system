@@ -3,7 +3,7 @@ def calculate_deposit_percentage(flags: int) -> int:
     Calculates the pre-order deposit percentage based on the number of flags a user has.
     """
     if flags == 0:
-        return 0
+        return 10
     elif flags == 1:
         return 10
     elif flags == 2:

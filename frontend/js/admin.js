@@ -193,6 +193,11 @@ function showSection(sectionId) {
     if (sectionId === 'menu') loadFoodCatalog();
     if (sectionId === 'stock') loadDailyStock();
     if (sectionId === 'holidays') loadHolidays();
+    if (sectionId === 'feedback') loadAdminFeedback();
+    if (sectionId === 'notifications') {
+        toggleNotificationTarget();
+        loadAdminNotifications();
+    }
     if (sectionId === 'profits') {
         setMonthlyChartStatus('Loading monthly chart...', true, false);
         // Set today's date as default in expense-date field
@@ -630,11 +635,18 @@ async function setMockDateTime() {
             loadDailyStock();
             loadAllOrders();
         } else {
-            alert('❌ Failed to update system clock.');
+            let errorMessage = 'Failed to update system clock.';
+            try {
+                const errData = await response.json();
+                errorMessage = errData.detail || errData.message || errorMessage;
+            } catch (_) {
+                // Keep default message if body is not JSON
+            }
+            alert(`❌ ${errorMessage}`);
         }
     } catch (error) {
         console.error('Error updating mock clock:', error);
-        alert('❌ An error occurred.');
+        alert(`❌ An error occurred: ${error.message}`);
     }
 }
 
@@ -664,9 +676,16 @@ async function resetMockTime() {
 
 async function seedFakeOrders() {
     const date = document.getElementById('seed-date').value;
+    const countInput = document.getElementById('seed-count');
+    const count = countInput ? parseInt(countInput.value, 10) : 200;
 
     if (!date) {
         alert("Please select a date to seed orders.");
+        return;
+    }
+
+    if (!Number.isFinite(count) || count < 1) {
+        alert("Please enter a valid order count (minimum 1).");
         return;
     }
 
@@ -674,7 +693,7 @@ async function seedFakeOrders() {
         const response = await fetch(`${API_BASE}/admin/seed-orders`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ date })
+            body: JSON.stringify({ date, count })
         });
 
         const data = await response.json();
@@ -914,6 +933,52 @@ async function deleteReviewAdmin(reviewId, foodId) {
 
 // --- PROFIT MANAGEMENT ---
 let currentWeekDate = new Date();
+let selectedMonthlyChartDate = null;
+
+function formatMonthInputValue(dateObj) {
+    const year = dateObj.getFullYear();
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+}
+
+function ensureMonthlyChartPickerInitialized() {
+    const monthInput = document.getElementById('monthly-chart-month');
+    if (!monthInput) return;
+
+    if (!selectedMonthlyChartDate) {
+        selectedMonthlyChartDate = new Date();
+    }
+
+    monthInput.value = formatMonthInputValue(selectedMonthlyChartDate);
+}
+
+function onMonthlyChartMonthChange() {
+    const monthInput = document.getElementById('monthly-chart-month');
+    if (!monthInput || !monthInput.value) return;
+
+    const [yearStr, monthStr] = monthInput.value.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10);
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return;
+
+    selectedMonthlyChartDate = new Date(year, month - 1, 1);
+    loadMonthlyChart();
+}
+
+function shiftMonthlyChart(deltaMonths) {
+    if (!selectedMonthlyChartDate) {
+        selectedMonthlyChartDate = new Date();
+    }
+
+    selectedMonthlyChartDate = new Date(
+        selectedMonthlyChartDate.getFullYear(),
+        selectedMonthlyChartDate.getMonth() + deltaMonths,
+        1
+    );
+
+    ensureMonthlyChartPickerInitialized();
+    loadMonthlyChart();
+}
 
 function getWeekStartEnd(date) {
     const d = new Date(date);
@@ -931,6 +996,7 @@ function getWeekStartEnd(date) {
 
 async function loadProfitData() {
     const week = getWeekStartEnd(currentWeekDate);
+    ensureMonthlyChartPickerInitialized();
     const chartLoadPromise = loadMonthlyChart();
     
     try {
@@ -1091,8 +1157,14 @@ async function loadMonthlyChart() {
     setMonthlyChartStatus('Loading monthly chart...', true, false);
 
     try {
-        // Let backend pick month/year from its own (possibly mocked) clock to avoid an extra API round-trip.
-        const response = await fetch(`${API_BASE}/api/admin/monthly-profit`);
+        if (!selectedMonthlyChartDate) {
+            selectedMonthlyChartDate = new Date();
+        }
+
+        const year = selectedMonthlyChartDate.getFullYear();
+        const month = selectedMonthlyChartDate.getMonth() + 1;
+
+        const response = await fetch(`${API_BASE}/api/admin/monthly-profit?year=${year}&month=${month}`);
         if (!response.ok) throw new Error('Failed to fetch monthly data');
         
         const data = await response.json();
@@ -1260,4 +1332,131 @@ function renderProfitChart(labels, profitData, revenueData, expenseData) {
             }
         }
     });
+}
+
+function toggleNotificationTarget() {
+    const target = document.getElementById('notify-target')?.value || 'global';
+    const userLabel = document.getElementById('notify-user-label');
+    const userInput = document.getElementById('notify-user-id');
+    const shouldShow = target === 'personal';
+    if (userLabel) userLabel.style.display = shouldShow ? 'block' : 'none';
+    if (userInput) userInput.style.display = shouldShow ? 'block' : 'none';
+}
+
+async function loadAdminFeedback() {
+    const tbody = document.getElementById('admin-feedback-body');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center">Loading...</td></tr>';
+
+    try {
+        const response = await fetch(`${API_BASE}/api/admin/feedback`);
+        if (!response.ok) throw new Error('Failed to load feedback');
+        const rows = await response.json();
+
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center">No suggestions or complaints yet.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = rows.map(r => `
+            <tr>
+                <td>${r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td>
+                <td>${r.user_id}</td>
+                <td>${r.category}</td>
+                <td>${r.subject}</td>
+                <td>${r.message}</td>
+                <td><span class="status-${r.status}">${r.status}</span></td>
+                <td>
+                    <select onchange="updateFeedbackStatus(${r.id}, this.value)">
+                        <option value="open" ${r.status === 'open' ? 'selected' : ''}>open</option>
+                        <option value="in_review" ${r.status === 'in_review' ? 'selected' : ''}>in_review</option>
+                        <option value="resolved" ${r.status === 'resolved' ? 'selected' : ''}>resolved</option>
+                    </select>
+                </td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        console.error(error);
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="color:red;">Failed to load feedback</td></tr>';
+    }
+}
+
+async function updateFeedbackStatus(id, status) {
+    try {
+        const response = await fetch(`${API_BASE}/api/admin/feedback/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status })
+        });
+        if (!response.ok) throw new Error('Failed to update status');
+        loadAdminFeedback();
+    } catch (error) {
+        console.error(error);
+        alert('Failed to update feedback status');
+    }
+}
+
+async function sendNotification() {
+    const target = document.getElementById('notify-target')?.value || 'global';
+    const user_id = document.getElementById('notify-user-id')?.value?.trim();
+    const title = document.getElementById('notify-title')?.value?.trim();
+    const message = document.getElementById('notify-message')?.value?.trim();
+    const created_by = localStorage.getItem('admission_no');
+
+    if (!title || !message) {
+        alert('Title and message are required');
+        return;
+    }
+    if (target === 'personal' && !user_id) {
+        alert('User Admission No is required for personal notifications');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/admin/notifications`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target, user_id, title, message, created_by })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Failed to send notification');
+
+        document.getElementById('notify-title').value = '';
+        document.getElementById('notify-message').value = '';
+        if (document.getElementById('notify-user-id')) document.getElementById('notify-user-id').value = '';
+        alert('Notification sent successfully');
+        loadAdminNotifications();
+    } catch (error) {
+        console.error(error);
+        alert(error.message || 'Failed to send notification');
+    }
+}
+
+async function loadAdminNotifications() {
+    const container = document.getElementById('admin-notification-list');
+    if (!container) return;
+    container.innerHTML = '<p>Loading...</p>';
+
+    try {
+        const response = await fetch(`${API_BASE}/api/admin/notifications`);
+        if (!response.ok) throw new Error('Failed to load notifications');
+        const list = await response.json();
+
+        if (!list.length) {
+            container.innerHTML = '<p>No notifications sent yet.</p>';
+            return;
+        }
+
+        container.innerHTML = list.map(n => `
+            <div class="menu-item-card" style="margin-bottom:10px;">
+                <h4>${n.title}</h4>
+                <p class="item-category">${n.user_id ? `Personal: ${n.user_id}` : 'Global'}</p>
+                <p>${n.message}</p>
+                <p class="item-category">${n.created_at ? new Date(n.created_at).toLocaleString() : '-'}</p>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error(error);
+        container.innerHTML = '<p style="color:red;">Failed to load notifications</p>';
+    }
 }

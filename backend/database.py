@@ -1,7 +1,6 @@
 import os
 
 from sqlalchemy import create_engine
-from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -12,7 +11,14 @@ DATABASE_URL = "postgresql://postgres.nabophvqcuatxjhgnaat:bingerlover%4018@aws-
 print("--- ATTEMPTING CONNECTION ---")
 
 try:
-    engine = create_engine(DATABASE_URL, poolclass=NullPool)
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+        pool_timeout=30,
+        pool_recycle=1800,
+    )
     # This test connection ensures your credentials are correct
     with engine.connect() as connection:
         print("CONNECTION SUCCESSFUL!")

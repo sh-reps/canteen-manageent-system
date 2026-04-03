@@ -10,6 +10,7 @@ from fastapi import APIRouter, FastAPI, Depends, HTTPException, status, Query, B
 app = FastAPI(title="Canteen Management System API")
 
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
@@ -79,9 +80,27 @@ try:
         conn.execute(text("ALTER TABLE booked_items ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;"))
         # Automatically add the section column to seats and safely assign the default value to existing rows
         conn.execute(text("ALTER TABLE seats ADD COLUMN IF NOT EXISTS section VARCHAR DEFAULT 'student';"))
+        conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS drop_point VARCHAR;"))
+        conn.execute(text("ALTER TABLE IF EXISTS notifications ADD COLUMN IF NOT EXISTS created_by VARCHAR;"))
+        conn.execute(text("ALTER TABLE IF EXISTS notifications ADD COLUMN IF NOT EXISTS user_id VARCHAR;"))
+        conn.execute(text("ALTER TABLE IF EXISTS notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMP;"))
+        conn.execute(text("ALTER TABLE IF EXISTS system_feedback ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'open';"))
+        conn.execute(text("ALTER TABLE IF EXISTS system_feedback ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;"))
         conn.execute(text("ALTER TABLE food_items ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';"))
         conn.execute(text("ALTER TABLE food_items ADD COLUMN IF NOT EXISTS image_url VARCHAR DEFAULT '';"))
         conn.execute(text("ALTER TABLE food_items ADD COLUMN IF NOT EXISTS price_half INTEGER DEFAULT 0;"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_user_id ON bookings(user_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_booking_date ON bookings(booking_date);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_created_at ON bookings(created_at);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_date_status ON bookings(booking_date, status);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_seat_reservations_slot_date ON seat_reservations(time_slot, reservation_date);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_booked_items_booking_id ON booked_items(booking_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_food_stocks_food_day ON food_stocks(food_item_id, day_of_week);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_feedback_user_created ON system_feedback(user_id, created_at);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reviews_food_created ON food_reviews(food_item_id, created_at);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_logic_runs_date_name ON logic_runs(last_run_date, logic_name);"))
         # Forcefully drop the old unique constraint to stop the 500 errors
         conn.execute(text("ALTER TABLE logic_runs DROP CONSTRAINT IF EXISTS logic_runs_logic_name_key;"))
     print("[INFO] Schema updates applied.")
@@ -144,6 +163,7 @@ app.add_middleware(
     allow_methods=["*"], # Allows GET, POST, etc.
     allow_headers=["*"], # Allows all headers
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # Absolute path of the backend folder
@@ -207,7 +227,7 @@ def set_time(time_data: TimeModel, db: Session = Depends(get_db)):
     today = time_logic.get_current_date()
     db.query(models.LogicRun).filter(models.LogicRun.last_run_date == today).delete(synchronize_session=False)
     db.commit()
-    stock_logic.evaluate_time_triggers(db)
+    stock_logic.evaluate_time_triggers(db, skip_expiry=True)
     return {"message": f"Time set to {time_data.time}"}
 
 @app.post("/api/admin/set-date")
@@ -216,7 +236,7 @@ def set_date(date_data: DateModel, db: Session = Depends(get_db)):
     today = time_logic.get_current_date()
     db.query(models.LogicRun).filter(models.LogicRun.last_run_date == today).delete(synchronize_session=False)
     db.commit()
-    stock_logic.evaluate_time_triggers(db)
+    stock_logic.evaluate_time_triggers(db, skip_expiry=True)
     return {"message": f"Date set to {date_data.date}"}
 
 @app.post("/api/admin/set-datetime")
@@ -225,7 +245,7 @@ def set_datetime(data: DateTimeModel, db: Session = Depends(get_db)):
     today = time_logic.get_current_date()
     db.query(models.LogicRun).filter(models.LogicRun.last_run_date == today).delete(synchronize_session=False)
     db.commit()
-    stock_logic.evaluate_time_triggers(db)
+    stock_logic.evaluate_time_triggers(db, skip_expiry=True)
     return {"message": "Date and Time updated successfully."}
 
 @app.post("/api/admin/reset-time")
@@ -234,7 +254,7 @@ def reset_time(db: Session = Depends(get_db)):
     today = time_logic.get_current_date()
     db.query(models.LogicRun).filter(models.LogicRun.last_run_date == today).delete(synchronize_session=False)
     db.commit()
-    stock_logic.evaluate_time_triggers(db)
+    stock_logic.evaluate_time_triggers(db, skip_expiry=True)
     return {"message": "System time reset to real time."}
 
 @app.get("/api/time")
@@ -302,15 +322,28 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
 
     user_flags = user.flags or 0
 
+    valid_drop_points = {"canteen", "cs block", "l block", "new block", "ad block"}
+    normalized_drop_point = (booking_data.drop_point or "").strip().lower()
+
+    if booking_data.order_type == "parcel":
+        if not normalized_drop_point:
+            raise HTTPException(status_code=400, detail="Drop point is required for parcel orders.")
+        if normalized_drop_point not in valid_drop_points:
+            raise HTTPException(status_code=400, detail="Invalid drop point selected.")
+
     # 2.5 Check if user has reached maximum flags (blocked from booking)
     if user_flags >= 5:
         raise HTTPException(status_code=403, detail="You have reached the maximum number of flags and cannot book orders. Please contact the admin to reset your flags.")
+
+    item_ids = [c.item_id for c in booking_data.items]
+    food_items = db.query(models.FoodItem).filter(models.FoodItem.id.in_(item_ids)).all() if item_ids else []
+    food_items_by_id = {item.id: item for item in food_items}
 
     # Calculate deposit based on user flags
     deposit_percentage = calculate_deposit_percentage(user_flags)
     total_order_value = 0
     for cart_item in booking_data.items:
-        item = db.query(models.FoodItem).filter(models.FoodItem.id == cart_item.item_id).first()
+        item = food_items_by_id.get(cart_item.item_id)
         if item:
             # For simplicity, assuming full price for all items in deposit calculation
             total_order_value += item.price_full * cart_item.quantity
@@ -332,6 +365,7 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
             user_id=user.admission_no,
             scheduled_slot=booking_data.scheduled_slot,
             order_type=booking_data.order_type,
+            drop_point=normalized_drop_point if booking_data.order_type == "parcel" else None,
             booking_date=booking_date,
             status="confirmed"
         )
@@ -346,6 +380,7 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
 
         # Sort items by item_id to prevent database deadlocks during concurrent bookings
         sorted_items = sorted(booking_data.items, key=lambda x: x.item_id)
+        day_of_week_for_booking = booking_data.booking_date.strftime('%A').lower()
 
         for cart_item in sorted_items:
             booked_item = models.BookedItem(booking_id=new_booking.id, food_item_id=cart_item.item_id, quantity=cart_item.quantity)
@@ -353,11 +388,12 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
 
             # --- Live Base Stock Update ---
             # Increment the base stock for the item on its booking day immediately.
-            day_of_week_for_booking = booking_data.booking_date.strftime('%A').lower()
             stock_for_booking_day = get_or_create_stock(db, cart_item.item_id, day_of_week_for_booking)
             stock_for_booking_day.admin_base_stock += cart_item.quantity
 
-            food_item = db.query(models.FoodItem).filter(models.FoodItem.id == cart_item.item_id).first()
+            food_item = food_items_by_id.get(cart_item.item_id)
+            if not food_item:
+                raise Exception(f"Food item {cart_item.item_id} not found.")
 
             # Stock is only depleted for SAME-DAY bookings AFTER the recalculation cutoff.
             # Before the cutoff, pre-booking is unlimited.
@@ -681,7 +717,25 @@ def get_all_bookings(date: str = Query(None), db: Session = Depends(get_db)):
 
 @app.get("/users")
 def get_all_users(db: Session = Depends(get_db)):
-    return db.query(models.User).all()
+    users = db.query(models.User).all()
+    return [
+        {
+            "admission_no": u.admission_no,
+            "role": u.role,
+            "email": u.email,
+            "flags": u.flags or 0,
+            "flagged_at": u.flagged_at,
+        }
+        for u in users
+    ]
+
+
+@app.get("/users/{admission_no}/flags")
+def get_user_flags(admission_no: str, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.admission_no == admission_no).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"admission_no": user.admission_no, "flags": user.flags or 0}
 
 @app.delete("/users/{admission_no}")
 def delete_user(admission_no: str, db: Session = Depends(get_db)):
@@ -816,9 +870,21 @@ def seed_orders(payload: dict = Body(...), db: Session = Depends(get_db)):
     from datetime import datetime
     
     seed_date_str = payload.get("date")
+    requested_count = payload.get("count", 200)
     
     if not seed_date_str:
         raise HTTPException(status_code=400, detail="Missing date")
+
+    try:
+        requested_count = int(requested_count)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="count must be an integer")
+
+    if requested_count < 1:
+        raise HTTPException(status_code=400, detail="count must be at least 1")
+
+    # Keep this bounded so the endpoint stays responsive on lower-end machines.
+    requested_count = min(requested_count, 2000)
         
     seed_date = datetime.strptime(seed_date_str, "%Y-%m-%d").date()
     
@@ -843,8 +909,10 @@ def seed_orders(payload: dict = Body(...), db: Session = Depends(get_db)):
             
     orders_created = 0
     stock_increments = {}
+    booking_plans = []
+    food_map = {f.id: f for f in all_food_items}
 
-    for _ in range(200): # Generate 200 orders
+    for _ in range(requested_count):
         user = random.choice(users)
         meal_type = random.choice(["breakfast", "lunch"])
         food_items = breakfast_items if meal_type == "breakfast" else lunch_items
@@ -872,24 +940,20 @@ def seed_orders(payload: dict = Body(...), db: Session = Depends(get_db)):
         if not slots: continue # Skip if meal type is not breakfast or lunch
         
         slot = random.choice(slots)
-        seat_to_assign = None
+        seat_to_assign_id = None
         
         if order_type == "sit-in":
             user_section = 'staff' if user.role in ['staff', 'admin'] else 'student'
-            available = [s for s in all_seats if s.section == user_section and s.id not in used_seats[slot]]
+            available = [s.id for s in all_seats if s.section == user_section and s.id not in used_seats[slot]]
             if not available:
                 continue # Skip this loop iteration if the section is fully booked for this slot
-            seat_to_assign = random.choice(available)
-            
-        new_booking = models.Booking(user_id=user.admission_no, scheduled_slot=slot, order_type=order_type, booking_date=seed_date, status="confirmed")
-        db.add(new_booking)
-        db.flush() # Flush to get the new_booking.id
+            seat_to_assign_id = random.choice(available)
         
         # Select items for this order
         items_to_order = []
         main_meal = random.choice(main_meals)
         main_qty = random.randint(2, 5) if main_meal.is_countable else 1
-        items_to_order.append((main_meal, main_qty))
+        items_to_order.append((main_meal.id, main_qty))
         
         # Randomly add 0 to 2 extra items (curries, sides, drinks) to make the order realistic
         other_options = [f for f in food_items if f.id != main_meal.id]
@@ -898,31 +962,100 @@ def seed_orders(payload: dict = Body(...), db: Session = Depends(get_db)):
             extras = random.sample(other_options, min(num_extras, len(other_options)))
             for extra in extras:
                 extra_qty = random.randint(1, 3) if extra.is_countable else 1
-                items_to_order.append((extra, extra_qty))
+                items_to_order.append((extra.id, extra_qty))
 
-        for item, qty in items_to_order:
-            db.add(models.BookedItem(booking_id=new_booking.id, food_item_id=item.id, quantity=qty))
-            
-            # Accumulate stock increments in memory to update all at once later
-            stock_increments[item.id] = stock_increments.get(item.id, 0) + qty
-        
-        if order_type == "sit-in" and seat_to_assign:
-            db.add(models.SeatReservation(seat_id=seat_to_assign.id, booking_id=new_booking.id, time_slot=slot, reservation_date=seed_date))
-            used_seats[slot].add(seat_to_assign.id)
-            
+        booking_plans.append({
+            "user_id": user.admission_no,
+            "slot": slot,
+            "order_type": order_type,
+            "seat_id": seat_to_assign_id,
+            "items": items_to_order
+        })
+
+        if order_type == "sit-in" and seat_to_assign_id:
+            used_seats[slot].add(seat_to_assign_id)
+
         orders_created += 1
 
-    # Apply all stock updates in sorted order exactly ONCE to prevent deadlocks and ensure blazing fast speed
-    from .stock_logic import get_or_create_stock
+    if not booking_plans:
+        return {"status": "success", "message": "No orders generated. Check seats/users/menu setup."}
+
+    # Batch-create bookings with a single flush to obtain all booking IDs
+    new_bookings = [
+        models.Booking(
+            user_id=plan["user_id"],
+            scheduled_slot=plan["slot"],
+            order_type=plan["order_type"],
+            booking_date=seed_date,
+            status="confirmed"
+        )
+        for plan in booking_plans
+    ]
+    db.add_all(new_bookings)
+    db.flush()
+
+    # Batch-create booked items and seat reservations
+    booked_item_rows = []
+    seat_res_rows = []
+    for plan, booking in zip(booking_plans, new_bookings):
+        for item_id, qty in plan["items"]:
+            booked_item_rows.append(
+                models.BookedItem(booking_id=booking.id, food_item_id=item_id, quantity=qty)
+            )
+            stock_increments[item_id] = stock_increments.get(item_id, 0) + qty
+
+        if plan["order_type"] == "sit-in" and plan["seat_id"]:
+            seat_res_rows.append(
+                models.SeatReservation(
+                    seat_id=plan["seat_id"],
+                    booking_id=booking.id,
+                    time_slot=plan["slot"],
+                    reservation_date=seed_date
+                )
+            )
+
+    if booked_item_rows:
+        db.bulk_save_objects(booked_item_rows)
+    if seat_res_rows:
+        db.bulk_save_objects(seat_res_rows)
+
+    # Apply stock updates with one fetch pass and one commit
     day_of_week_for_seed = seed_date.strftime('%A').lower()
-    
-    for item_id in sorted(stock_increments.keys()):
-        qty = stock_increments[item_id]
-        stock_for_seed_day = get_or_create_stock(db, item_id, day_of_week_for_seed)
-        stock_for_seed_day.admin_base_stock += qty
+
+    item_ids = sorted(stock_increments.keys())
+    existing_stocks = db.query(models.FoodStock).filter(
+        models.FoodStock.day_of_week == day_of_week_for_seed,
+        models.FoodStock.food_item_id.in_(item_ids)
+    ).all() if item_ids else []
+
+    stock_by_item = {s.food_item_id: s for s in existing_stocks}
+    missing_item_ids = [item_id for item_id in item_ids if item_id not in stock_by_item]
+    if missing_item_ids:
+        missing_stocks = [
+            models.FoodStock(
+                food_item_id=item_id,
+                day_of_week=day_of_week_for_seed,
+                admin_base_stock=(food_map[item_id].admin_base_stock if item_id in food_map else 0),
+                prebook_pool=0,
+                walkin_pool=0,
+                breakfast_buffer=(food_map[item_id].breakfast_buffer if item_id in food_map else 0)
+            )
+            for item_id in missing_item_ids
+        ]
+        db.add_all(missing_stocks)
+        for stock in missing_stocks:
+            stock_by_item[stock.food_item_id] = stock
+
+    for item_id, qty in stock_increments.items():
+        stock_by_item[item_id].admin_base_stock += qty
         
     db.commit()
-    return {"status": "success", "message": f"Successfully generated {orders_created} mixed orders! Remember to trigger the time logic to recalculate stock."}
+    return {
+        "status": "success",
+        "message": f"Successfully generated {orders_created} mixed orders! Remember to trigger the time logic to recalculate stock.",
+        "requested_count": requested_count,
+        "generated_count": orders_created
+    }
 
 @app.post("/admin/clear-orders")
 def clear_orders(payload: dict = Body(...), db: Session = Depends(get_db)):
@@ -1340,7 +1473,7 @@ def get_weekly_profit(week_start: date = Query(None), db: Session = Depends(get_
 def get_monthly_profit(year: int = Query(None), month: int = Query(None), db: Session = Depends(get_db)):
     """Get profit data for all weeks in a month"""
     try:
-        from datetime import datetime
+        from datetime import timedelta
         if not year or not month:
             today = time_logic.get_current_date()
             year = today.year
@@ -1353,67 +1486,62 @@ def get_monthly_profit(year: int = Query(None), month: int = Query(None), db: Se
         else:
             end_date = date(year, month + 1, 1)
         
-        # Get all weekly profits for the month
-        weekly_profits = db.query(models.WeeklyProfit).filter(
-            models.WeeklyProfit.week_start_date >= start_date,
-            models.WeeklyProfit.week_start_date < end_date
-        ).order_by(models.WeeklyProfit.week_start_date).all()
-        
-        # If no data yet, calculate from expenses
-        if not weekly_profits:
-            # Get all daily expenses for the month
-            expenses = db.query(models.DailyExpense).filter(
-                models.DailyExpense.expense_date >= start_date,
-                models.DailyExpense.expense_date < end_date
-            ).all()
-            
-            # Group by week and calculate
-            weeks_data = {}
-            for expense in expenses:
-                week_start, week_end = get_week_start_end(expense.expense_date)
-                if week_start not in weeks_data:
-                    weeks_data[week_start] = {
-                        'week_start': str(week_start),
-                        'week_end': str(week_end),
-                        'expenses': 0,
-                        'revenue': 0
-                    }
-                weeks_data[week_start]['expenses'] += expense.amount
-            
-            # Calculate revenue for each week
-            for week_start_key, data in weeks_data.items():
-                week_start_date = datetime.strptime(data['week_start'], "%Y-%m-%d").date()
-                week_end_date = datetime.strptime(data['week_end'], "%Y-%m-%d").date()
-                data['revenue'] = calculate_week_revenue(week_start_date, week_end_date, db)
-                data['profit'] = data['revenue'] - data['expenses']
-                
-                # Save to database
+        # Build all unique weeks that overlap the selected month
+        overlap_week_starts = []
+        cursor = start_date
+        while cursor < end_date:
+            week_start, _ = get_week_start_end(cursor)
+            if week_start not in overlap_week_starts:
+                overlap_week_starts.append(week_start)
+            cursor += timedelta(days=1)
+
+        weeks_payload = []
+        for week_start_date in overlap_week_starts:
+            week_end_date = week_start_date + timedelta(days=6)
+
+            revenue = calculate_week_revenue(week_start_date, week_end_date, db)
+            expenses = db.query(func.coalesce(func.sum(models.DailyExpense.amount), 0)).filter(
+                models.DailyExpense.expense_date >= week_start_date,
+                models.DailyExpense.expense_date <= week_end_date
+            ).scalar() or 0
+            expenses = int(expenses)
+            profit = revenue - expenses
+
+            # Persist/update weekly snapshot for consistency with weekly view
+            weekly_record = db.query(models.WeeklyProfit).filter(
+                models.WeeklyProfit.week_start_date == week_start_date
+            ).first()
+            if weekly_record:
+                weekly_record.week_end_date = week_end_date
+                weekly_record.total_revenue = revenue
+                weekly_record.total_expenses = expenses
+                weekly_record.net_profit = profit
+                weekly_record.updated_at = time_logic.get_current_datetime()
+            else:
                 db.add(models.WeeklyProfit(
                     week_start_date=week_start_date,
                     week_end_date=week_end_date,
-                    total_revenue=data['revenue'],
-                    total_expenses=data['expenses'],
-                    net_profit=data['profit']
+                    total_revenue=revenue,
+                    total_expenses=expenses,
+                    net_profit=profit
                 ))
-            db.commit()
-            
-            weekly_profits = list(weeks_data.values())
-        else:
-            weekly_profits = [
-                {
-                    'week_start': str(w.week_start_date),
-                    'week_end': str(w.week_end_date),
-                    'revenue': w.total_revenue,
-                    'expenses': w.total_expenses,
-                    'profit': w.net_profit
-                }
-                for w in weekly_profits
-            ]
+
+            # Include only weeks that actually have some data
+            if revenue > 0 or expenses > 0:
+                weeks_payload.append({
+                    'week_start': str(week_start_date),
+                    'week_end': str(week_end_date),
+                    'revenue': revenue,
+                    'expenses': expenses,
+                    'profit': profit
+                })
+
+        db.commit()
         
         return {
             "year": year,
             "month": month,
-            "weeks": weekly_profits
+            "weeks": weeks_payload
         }
     except Exception as e:
         import traceback
@@ -1435,3 +1563,170 @@ def delete_daily_expense(expense_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# USER FEEDBACK & NOTIFICATIONS
+# ==========================================
+
+@app.post("/api/feedback")
+def create_feedback(payload: schemas.FeedbackCreate, db: Session = Depends(get_db)):
+    category = (payload.category or "").strip().lower()
+    if category not in {"suggestion", "complaint"}:
+        raise HTTPException(status_code=400, detail="Category must be suggestion or complaint")
+
+    user = db.query(models.User).filter(models.User.admission_no == payload.admission_no).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    subject = (payload.subject or "").strip()
+    message = (payload.message or "").strip()
+    if not subject or not message:
+        raise HTTPException(status_code=400, detail="Subject and message are required")
+
+    row = models.SystemFeedback(
+        user_id=payload.admission_no,
+        category=category,
+        subject=subject,
+        message=message,
+        status="open"
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"status": "success", "id": row.id}
+
+
+@app.get("/api/feedback/me/{admission_no}")
+def get_my_feedback(admission_no: str, db: Session = Depends(get_db)):
+    rows = db.query(models.SystemFeedback).filter(
+        models.SystemFeedback.user_id == admission_no
+    ).order_by(models.SystemFeedback.created_at.desc()).all()
+
+    return [
+        {
+            "id": r.id,
+            "category": r.category,
+            "subject": r.subject,
+            "message": r.message,
+            "status": r.status,
+            "created_at": r.created_at,
+            "updated_at": r.updated_at,
+        }
+        for r in rows
+    ]
+
+
+@app.get("/api/admin/feedback")
+def get_all_feedback(db: Session = Depends(get_db)):
+    rows = db.query(models.SystemFeedback).order_by(models.SystemFeedback.created_at.desc()).all()
+    return [
+        {
+            "id": r.id,
+            "user_id": r.user_id,
+            "category": r.category,
+            "subject": r.subject,
+            "message": r.message,
+            "status": r.status,
+            "created_at": r.created_at,
+            "updated_at": r.updated_at,
+        }
+        for r in rows
+    ]
+
+
+@app.patch("/api/admin/feedback/{feedback_id}")
+def update_feedback_status(feedback_id: int, payload: schemas.FeedbackStatusUpdate, db: Session = Depends(get_db)):
+    row = db.query(models.SystemFeedback).filter(models.SystemFeedback.id == feedback_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+
+    next_status = (payload.status or "").strip().lower()
+    if next_status not in {"open", "in_review", "resolved"}:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    row.status = next_status
+    db.commit()
+    return {"status": "success"}
+
+
+@app.post("/api/admin/notifications")
+def create_notification(payload: schemas.NotificationCreate, db: Session = Depends(get_db)):
+    target = (payload.target or "global").strip().lower()
+    if target not in {"global", "personal"}:
+        raise HTTPException(status_code=400, detail="target must be global or personal")
+
+    title = (payload.title or "").strip()
+    message = (payload.message or "").strip()
+    if not title or not message:
+        raise HTTPException(status_code=400, detail="Title and message are required")
+
+    target_user = None
+    if target == "personal":
+        target_user = (payload.user_id or "").strip()
+        if not target_user:
+            raise HTTPException(status_code=400, detail="user_id is required for personal notifications")
+        user = db.query(models.User).filter(models.User.admission_no == target_user).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Target user not found")
+
+    row = models.Notification(
+        title=title,
+        message=message,
+        user_id=target_user,
+        created_by=(payload.created_by or "").strip() or None
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"status": "success", "id": row.id}
+
+
+@app.get("/api/admin/notifications")
+def get_all_notifications(db: Session = Depends(get_db)):
+    rows = db.query(models.Notification).order_by(models.Notification.created_at.desc()).all()
+    return [
+        {
+            "id": r.id,
+            "title": r.title,
+            "message": r.message,
+            "user_id": r.user_id,
+            "created_by": r.created_by,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
+
+
+@app.get("/api/notifications/{admission_no}")
+def get_user_notifications(admission_no: str, db: Session = Depends(get_db)):
+    rows = db.query(models.Notification).filter(
+        (models.Notification.user_id == None) | (models.Notification.user_id == admission_no)
+    ).order_by(models.Notification.created_at.desc()).all()
+
+    notifications = [
+        {
+            "id": r.id,
+            "type": "admin",
+            "title": r.title,
+            "message": r.message,
+            "target": "global" if r.user_id is None else "personal",
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
+
+    user = db.query(models.User).filter(models.User.admission_no == admission_no).first()
+    if user:
+        flags = user.flags or 0
+        if flags > 0:
+            notifications.insert(0, {
+                "id": f"flag-{admission_no}",
+                "type": "flag",
+                "title": "Flag Update",
+                "message": f"You currently have {flags} flag(s). Reach out to admin if this seems incorrect.",
+                "target": "personal",
+                "created_at": user.flagged_at,
+            })
+
+    return notifications

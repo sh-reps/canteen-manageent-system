@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from . import models
 from .time_logic import get_current_date
@@ -64,12 +64,16 @@ def get_or_create_stock(db, food_item_id, day_of_week):
 def get_all_food_items(db: Session, day=None):
     # Return all food items with their stock for the given day (default: today)
     from .models import FoodItem, FoodStock
-    items = db.query(FoodItem).all()
     if not day:
         day = get_current_date().strftime('%A').lower()
+
+    items = db.query(FoodItem).all()
+    stocks = db.query(FoodStock).filter(FoodStock.day_of_week == day).all()
+    stocks_by_food_id = {s.food_item_id: s for s in stocks}
+
     result = []
     for item in items:
-        stock = db.query(FoodStock).filter_by(food_item_id=item.id, day_of_week=day).first()
+        stock = stocks_by_food_id.get(item.id)
         stock_dict = {
             'admin_base_stock': stock.admin_base_stock if stock else 0,
             'prebook_pool': stock.prebook_pool if stock else 0,
@@ -206,10 +210,19 @@ def process_expired_orders(db: Session, now: datetime.datetime):
     today = now.date()
     
     # Get all confirmed bookings for today
-    bookings = db.query(models.Booking).filter(
+    bookings = db.query(models.Booking).options(
+        joinedload(models.Booking.items),
+        joinedload(models.Booking.booked_seats)
+    ).filter(
         models.Booking.booking_date == today,
         models.Booking.status == 'confirmed'
     ).all()
+
+    user_ids = {b.user_id for b in bookings}
+    users_by_id = {
+        u.admission_no: u
+        for u in db.query(models.User).filter(models.User.admission_no.in_(user_ids)).all()
+    } if user_ids else {}
     
     expired_count = 0
     flagged_users = []
@@ -228,10 +241,13 @@ def process_expired_orders(db: Session, now: datetime.datetime):
                 booking.status = 'no-show'
 
                 # Flag the user
-                user = db.query(models.User).filter(models.User.admission_no == booking.user_id).first()
+                user = users_by_id.get(booking.user_id)
                 if user:
-                    if user.flags < 5:
-                        user.flags += 1
+                    current_flags = user.flags or 0
+                    if current_flags < 5:
+                        user.flags = current_flags + 1
+                    else:
+                        user.flags = current_flags
                     user.flagged_at = now
                     flagged_users.append((user.admission_no, user.flags))
 
@@ -274,7 +290,7 @@ def is_working_day(target_date: datetime.date, db: Session) -> bool:
         return False
     return True
 
-def evaluate_time_triggers(db: Session):
+def evaluate_time_triggers(db: Session, skip_expiry: bool = False):
     """
     Evaluates the current mocked time and triggers any pending stock logic.
     This function is designed to be idempotent and safe to call frequently.
@@ -288,7 +304,7 @@ def evaluate_time_triggers(db: Session):
     tomorrow_working = is_working_day(tomorrow_date, db)
     
     # Continuously evaluate expirations for today's orders (No-shows)
-    if today_working:
+    if today_working and not skip_expiry:
         process_expired_orders(db, now)
 
     # Get the set of logic that has already run today from the database.

@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function calculateDepositPercentage(flags) {
-    if (flags === 0) return 0;
+    if (flags === 0) return 10;
     else if (flags === 1) return 10;
     else if (flags === 2) return 30;
     else if (flags === 3) return 50;

@@ -58,6 +58,7 @@ class BookingCreate(BaseModel):
     items: List[CartItem]
     scheduled_slot: str
     order_type: str
+    drop_point: Optional[str] = None
     booking_date: date
     seat_ids: Optional[List[int]] = []
 
@@ -136,6 +137,7 @@ class BookingResponse(BaseModel):
     created_at: Optional[datetime] = None  # New: order date/time
     scheduled_slot: str
     order_type: str
+    drop_point: Optional[str] = None
     status: str
     items: List[BookedItemResponse]
     booked_seats: List[SeatReservationResponse]
@@ -216,3 +218,22 @@ class WeeklyProfit(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FeedbackCreate(BaseModel):
+    admission_no: str
+    category: str
+    subject: str
+    message: str
+
+
+class FeedbackStatusUpdate(BaseModel):
+    status: str
+
+
+class NotificationCreate(BaseModel):
+    title: str
+    message: str
+    target: str = "global"  # global | personal
+    user_id: Optional[str] = None
+    created_by: Optional[str] = None

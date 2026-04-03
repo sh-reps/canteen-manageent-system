@@ -62,6 +62,7 @@ class Booking(Base):
     created_at = Column(DateTime, default=time_logic.get_current_datetime)  # New: order date/time
     scheduled_slot = Column(String, nullable=False)
     order_type = Column(String) # 'sit-in' or 'parcel'
+    drop_point = Column(String, nullable=True)
     status = Column(String, default="confirmed")
     items = relationship("BookedItem", back_populates="booking")
     booked_seats = relationship("SeatReservation", back_populates="booking")
@@ -139,3 +140,25 @@ class WeeklyProfit(Base):
     net_profit = Column(Integer, default=0)  # Revenue - Expenses
     created_at = Column(DateTime, default=time_logic.get_current_datetime)
     updated_at = Column(DateTime, default=time_logic.get_current_datetime, onupdate=time_logic.get_current_datetime)
+
+
+class SystemFeedback(Base):
+    __tablename__ = "system_feedback"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.admission_no"), nullable=False)
+    category = Column(String, nullable=False)  # suggestion | complaint
+    subject = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    status = Column(String, default="open")  # open | in_review | resolved
+    created_at = Column(DateTime, default=time_logic.get_current_datetime)
+    updated_at = Column(DateTime, default=time_logic.get_current_datetime, onupdate=time_logic.get_current_datetime)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    user_id = Column(String, ForeignKey("users.admission_no"), nullable=True)  # null = global
+    created_by = Column(String, ForeignKey("users.admission_no"), nullable=True)
+    created_at = Column(DateTime, default=time_logic.get_current_datetime)

@@ -7,7 +7,7 @@ function generateOrderRow(order) {
     let orderDate = order.created_at ? new Date(order.created_at).toLocaleString() : '-';
     const seatNumbers = (order.booked_seats && order.booked_seats.length > 0) 
         ? order.booked_seats.map(s => `T${s.seat.table_number}-S${s.seat.seat_number}`).join(", ")
-        : "Parcel";
+        : `Parcel${order.drop_point ? ` (${order.drop_point.toUpperCase()})` : ''}`;
     
     // Show cancel button only for 'confirmed' orders. The backend will validate the time.
     const actionButton = order.status === 'confirmed'
