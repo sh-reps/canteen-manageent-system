@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 sqlalchemy
 psycopg2-binary
-passlib[bcrypt]
+bcrypt
 pydantic[email]
 fastapi-mail
 python-multipart

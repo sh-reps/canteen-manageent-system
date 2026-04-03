@@ -2,14 +2,11 @@ import argparse
 import sys
 from getpass import getpass
 
+import bcrypt
 from dotenv import load_dotenv
-from passlib.context import CryptContext
 
 
 load_dotenv()
-
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def validate_password(password: str) -> None:
@@ -20,7 +17,7 @@ def validate_password(password: str) -> None:
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def get_user(db, identifier: str):
