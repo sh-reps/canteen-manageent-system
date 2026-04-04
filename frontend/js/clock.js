@@ -1,6 +1,6 @@
 // C:\Canteen management system\frontend\js\clock.js
 if (typeof API_BASE === 'undefined') {
-    var API_BASE = "";
+    var API_BASE = "http://127.0.0.1:8000";
 }
 
 if (typeof timeOffset === 'undefined') {

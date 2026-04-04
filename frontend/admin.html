@@ -25,10 +25,7 @@
             <li id="nav-users" onclick="showSection('users')" class="nav-item">
                 <i class="fas fa-users"></i> Users
             </li>
-            <li class="nav-item nav-group-title" onclick="location.href='/flagged_users'">
-                <i class="fas fa-shield-alt"></i> Flags & Behavior
-            </li>
-            <li id="nav-flagged-users" onclick="location.href='/flagged_users'" class="nav-item nav-sub-item">
+            <li id="nav-flagged-users" onclick="showSection('flagged-users')" class="nav-item">
                 <i class="fas fa-flag"></i> Flagged Users
             </li>
             <li id="nav-menu" onclick="showSection('menu')" class="nav-item">
@@ -41,7 +38,7 @@
                 <i class="fas fa-bug"></i> Debug
             </li>
             <li id="nav-holidays" onclick="showSection('holidays')" class="nav-item">
-                <i class="fas fa-calendar-times"></i> Holidays
+                <i class="fas fa-calendar-alt"></i> Calendar
             </li>
             <li id="nav-profits" onclick="showSection('profits')" class="nav-item">
                 <i class="fas fa-chart-line"></i> Profits
@@ -51,12 +48,6 @@
             </li>
             <li id="nav-notifications" onclick="showSection('notifications')" class="nav-item">
                 <i class="fas fa-bell"></i> Notifications
-            </li>
-            <li id="nav-cashier" onclick="showSection('cashier')" class="nav-item">
-                <i class="fas fa-cash-register"></i> Cashier Mode
-            </li>
-            <li id="nav-analytics" onclick="showSection('analytics')" class="nav-item">
-                <i class="fas fa-chart-pie"></i> Menu Analytics
             </li>
         </ul>
         <div class="sidebar-footer">
@@ -106,11 +97,39 @@
                     <tr>
                         <th>Admission No</th>
                         <th>Role</th>
+                        <th>Email</th>
+                        <th>Flags</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="admin-users-body">
                     </tbody>
+            </table>
+        </section>
+
+        <section id="section-flagged-users" class="admin-section" style="display:none;">
+            <div class="section-header">
+                <h2>Flagged Users Management</h2>
+                <button class="btn-action" onclick="loadFlaggedUsers()">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+                <button class="btn-danger" onclick="resetAllFlags()">
+                    <i class="fas fa-broom"></i> Reset All Flags
+                </button>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Admission No.</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Flags</th>
+                        <th>Deposit %</th>
+                        <th>Last Flagged</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="admin-flagged-users-body"></tbody>
             </table>
         </section>
 
@@ -145,6 +164,11 @@
             </div>
             <div id="admin-stock-list" class="menu-manage-grid">
                 </div>
+            <div style="margin-top: 16px; display: flex; justify-content: flex-end;">
+                <button id="reset-all-stock-btn" type="button" class="btn-danger">
+                    <i class="fas fa-trash-alt"></i> Reset All Stock For Selected Day
+                </button>
+            </div>
         </section>
 
         <section id="section-clock" class="admin-section" style="display:none;">
@@ -195,29 +219,32 @@
 
         <section id="section-holidays" class="admin-section" style="display:none;">
             <div class="section-header">
-                <h2>Holiday & Special Day Management</h2>
+                <h2>Calendar Management</h2>
             </div>
             <div class="holiday-container">
                 <div class="booking-card">
-                    <h3>Add Day Rule</h3>
+                    <h3>Add Calendar Day</h3>
                     <div class="form-group">
+                        <label>Date</label>
                         <input type="date" id="holiday-date">
-                        <select id="holiday-type">
+                        <label>Day Type</label>
+                        <select id="holiday-day-type" onchange="toggleEventPercentageField()">
                             <option value="holiday">Holiday (Bookings blocked)</option>
-                            <option value="special">Special Day (Prediction boost)</option>
+                            <option value="working_day">Working Day Override (Allow weekend booking)</option>
+                            <option value="event">Event Day (Bookings open)</option>
                         </select>
-                        <input type="text" id="holiday-label" placeholder="Optional label (Fest, Orientation, etc.)">
-                        <button onclick="addHoliday()" class="btn-confirm">Add Rule</button>
-                    </div>
-                    <h3 style="margin-top:18px;">Special Day Prediction</h3>
-                    <div class="form-group">
-                        <input type="date" id="special-predict-date">
-                        <button onclick="runSpecialDayPrediction()" class="btn-action">Run Prediction</button>
-                        <div id="special-day-prediction-result" class="item-category" style="margin-top:8px;"></div>
+                        <label>Label (optional)</label>
+                        <input type="text" id="holiday-label" placeholder="e.g. Tech Fest">
+                        <div id="event-percentage-wrap" style="display:none;">
+                            <label>Extra % for Lunch + Snacks</label>
+                            <input type="number" id="holiday-extra-pct" min="0" max="200" value="0" placeholder="0">
+                            <small>Applied only to lunch/snack buffer. Breakfast is not affected.</small>
+                        </div>
+                        <button onclick="addHoliday()" class="btn-confirm">Save Day</button>
                     </div>
                 </div>
                 <div class="booking-card">
-                    <h3>Configured Day Rules</h3>
+                    <h3>Configured Days</h3>
                     <ul id="holiday-list" class="holiday-list-class"></ul>
                 </div>
             </div>
@@ -323,57 +350,6 @@
                 </div>
             </div>
         </section>
-
-        <section id="section-cashier" class="admin-section" style="display:none;">
-            <div class="section-header">
-                <h2>Cashier Mode</h2>
-            </div>
-            <div class="holiday-container">
-                <div class="booking-card">
-                    <h3>Scan Order Barcode</h3>
-                    <p class="item-category">Use a scanner or camera to read the barcode shown on the user's upcoming order.</p>
-                    <div class="form-group">
-                        <input type="text" id="cashier-barcode-input" placeholder="Scan / Enter Order Barcode">
-                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                            <button onclick="lookupCashierOrders()" class="btn-confirm">Find Order</button>
-                            <button onclick="openCashierScanner()" class="btn-action"><i class="fas fa-camera"></i> Open Scanner</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="booking-card">
-                    <h3>Matched Order</h3>
-                    <div id="cashier-order-details"></div>
-                </div>
-            </div>
-        </section>
-
-        <section id="section-analytics" class="admin-section" style="display:none;">
-            <div class="section-header">
-                <h2>Menu Performance Analytics</h2>
-                <div style="display:flex; gap:8px; align-items:center;">
-                    <select id="analytics-days">
-                        <option value="30">Last 30 days</option>
-                        <option value="60">Last 60 days</option>
-                        <option value="90">Last 90 days</option>
-                    </select>
-                    <button class="btn-action" onclick="loadMenuAnalytics()"><i class="fas fa-sync"></i> Refresh</button>
-                </div>
-            </div>
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Item</th>
-                        <th>Category</th>
-                        <th>Meal Type</th>
-                        <th>Qty Sold</th>
-                        <th>Revenue</th>
-                        <th>Avg Rating</th>
-                        <th>Reviews</th>
-                    </tr>
-                </thead>
-                <tbody id="menu-analytics-body"></tbody>
-            </table>
-        </section>
     </main>
 
     <div id="user-modal" class="modal-overlay" style="display:none;">
@@ -418,9 +394,6 @@
                 <div class="form-group" id="food-countable-container">
                     <label style="display: flex; align-items: center;"><input type="checkbox" id="food-is-countable" style="width: auto; margin-right: 10px;"> Is Countable (e.g. Appam)</label>
                 </div>
-                <div class="form-group" id="food-veg-container">
-                    <label style="display: flex; align-items: center;"><input type="checkbox" id="food-is-veg" style="width: auto; margin-right: 10px;" checked> Veg Item</label>
-                </div>
             </div>
             <div class="btn-group">
                 <button onclick="saveFood()" class="btn-confirm">Add to Menu</button>
@@ -464,22 +437,6 @@
             </div>
             <div class="btn-group" style="margin-top: 15px;">
                 <button onclick="closeModal('reviews-modal')" class="btn-action">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="cashier-scanner-modal" class="modal-overlay" style="display:none;">
-        <div class="modal-content booking-card" style="max-width: 680px; width: min(92vw, 680px);">
-            <div class="modal-header">
-                <h3><i class="fas fa-camera"></i> Scanner</h3>
-                <span class="close-x" onclick="closeCashierScanner()">&times;</span>
-            </div>
-            <p class="item-category" id="cashier-scanner-status">Open the camera and point it at the barcode.</p>
-            <div style="display:flex; justify-content:center; margin: 12px 0;">
-                <video id="cashier-scanner-video" autoplay playsinline muted style="width:100%; max-height:420px; border-radius:12px; background:#111; border:1px solid rgba(255,255,255,0.12);"></video>
-            </div>
-            <div class="btn-group" style="justify-content:space-between;">
-                <button class="btn-action" onclick="closeCashierScanner()">Close Scanner</button>
             </div>
         </div>
     </div>

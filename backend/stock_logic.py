@@ -2,67 +2,105 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from . import models
 from .time_logic import get_current_date
+import math
 
 # Track if 1am/7am logic has run for today
 import datetime
 
+EVENT_HISTORY_LOOKBACK_DAYS = 120
+EVENT_HISTORY_SAMPLE_DAYS = 6
+REGULAR_HISTORY_SAMPLE_DAYS = 20
 
-def _calculate_predicted_buffer(db: Session, food_item_id: int, meal_type: str, target_date: datetime.date, live_preorders: int) -> int:
-    """Predict extra stock using last 3 weeks and, for special days, past special-day demand."""
-    from_date = target_date - datetime.timedelta(days=21)
 
-    daily_qty_rows = db.query(
+def _is_event_day(db: Session, target_date: datetime.date) -> models.Holiday | None:
+    return db.query(models.Holiday).filter(
+        models.Holiday.date == target_date,
+        models.Holiday.day_type == 'event'
+    ).first()
+
+
+def _get_recent_event_dates(db: Session, target_date: datetime.date, limit: int = EVENT_HISTORY_SAMPLE_DAYS):
+    rows = db.query(models.Holiday.date).filter(
+        models.Holiday.day_type == 'event',
+        models.Holiday.date < target_date
+    ).order_by(models.Holiday.date.desc()).limit(limit).all()
+    return [r[0] for r in rows]
+
+
+def _avg_item_sales_for_dates(db: Session, food_item_id: int, dates: list[datetime.date]) -> float:
+    if not dates:
+        return 0.0
+
+    by_date = db.query(
         models.Booking.booking_date,
         func.coalesce(func.sum(models.BookedItem.quantity), 0)
     ).join(
         models.BookedItem, models.BookedItem.booking_id == models.Booking.id
-    ).join(
-        models.FoodItem, models.FoodItem.id == models.BookedItem.food_item_id
     ).filter(
         models.BookedItem.food_item_id == food_item_id,
-        models.Booking.booking_date >= from_date,
-        models.Booking.booking_date < target_date,
-        models.Booking.status != 'cancelled',
-        models.FoodItem.meal_type == meal_type
+        models.Booking.booking_date.in_(dates),
+        models.Booking.status.notin_(['cancelled', 'no-show'])
     ).group_by(models.Booking.booking_date).all()
 
-    regular_avg = 0
-    if daily_qty_rows:
-        regular_avg = sum(int(r[1] or 0) for r in daily_qty_rows) / len(daily_qty_rows)
+    qty_by_date = {row[0]: int(row[1] or 0) for row in by_date}
+    total = sum(qty_by_date.get(d, 0) for d in dates)
+    return total / max(1, len(dates))
 
-    special_day = db.query(models.Holiday).filter(
-        models.Holiday.date == target_date,
-        models.Holiday.day_type == 'special'
-    ).first()
 
-    special_avg = 0
-    if special_day:
-        past_special_dates = db.query(models.Holiday.date).filter(
-            models.Holiday.day_type == 'special',
-            models.Holiday.date < target_date
-        ).order_by(models.Holiday.date.desc()).limit(8).all()
-        past_dates = [d[0] for d in past_special_dates]
+def _avg_item_sales_for_recent_regular_days(db: Session, food_item_id: int, target_date: datetime.date) -> float:
+    start_date = target_date - datetime.timedelta(days=EVENT_HISTORY_LOOKBACK_DAYS)
+    grouped = db.query(
+        models.Booking.booking_date,
+        func.coalesce(func.sum(models.BookedItem.quantity), 0)
+    ).join(
+        models.BookedItem, models.BookedItem.booking_id == models.Booking.id
+    ).filter(
+        models.BookedItem.food_item_id == food_item_id,
+        models.Booking.booking_date >= start_date,
+        models.Booking.booking_date < target_date,
+        models.Booking.status.notin_(['cancelled', 'no-show'])
+    ).group_by(models.Booking.booking_date).order_by(models.Booking.booking_date.desc()).all()
 
-        if past_dates:
-            special_rows = db.query(
-                models.Booking.booking_date,
-                func.coalesce(func.sum(models.BookedItem.quantity), 0)
-            ).join(
-                models.BookedItem, models.BookedItem.booking_id == models.Booking.id
-            ).join(
-                models.FoodItem, models.FoodItem.id == models.BookedItem.food_item_id
-            ).filter(
-                models.BookedItem.food_item_id == food_item_id,
-                models.Booking.booking_date.in_(past_dates),
-                models.Booking.status != 'cancelled',
-                models.FoodItem.meal_type == meal_type
-            ).group_by(models.Booking.booking_date).all()
-            if special_rows:
-                special_avg = sum(int(r[1] or 0) for r in special_rows) / len(special_rows)
+    if not grouped:
+        return 0.0
 
-    blended_prediction = regular_avg if not special_avg else (0.6 * regular_avg + 0.4 * special_avg)
-    predicted_total = max(live_preorders, int(round(blended_prediction)))
-    return max(0, predicted_total - live_preorders)
+    event_dates = {d[0] for d in db.query(models.Holiday.date).filter(
+        models.Holiday.day_type == 'event',
+        models.Holiday.date >= start_date,
+        models.Holiday.date < target_date
+    ).all()}
+
+    regular_sales = []
+    for day, qty in grouped:
+        if day.weekday() >= 5:
+            continue
+        if day in event_dates:
+            continue
+        regular_sales.append(int(qty or 0))
+        if len(regular_sales) >= REGULAR_HISTORY_SAMPLE_DAYS:
+            break
+
+    if not regular_sales:
+        return 0.0
+    return sum(regular_sales) / len(regular_sales)
+
+
+def _event_multiplier_for_item(db: Session, food_item_id: int, target_date: datetime.date) -> float:
+    recent_event_dates = _get_recent_event_dates(db, target_date)
+    if not recent_event_dates:
+        return 1.0
+
+    event_avg = _avg_item_sales_for_dates(db, food_item_id, recent_event_dates)
+    regular_avg = _avg_item_sales_for_recent_regular_days(db, food_item_id, target_date)
+
+    if event_avg <= 0:
+        return 1.0
+    if regular_avg <= 0:
+        return 1.2
+
+    raw = event_avg / regular_avg
+    # Dampen spikes and clamp for stable stock planning.
+    return max(1.0, min(2.5, 0.6 + (0.4 * raw)))
 
 def process_1am_lunch_recalc(db: Session):
     """
@@ -71,9 +109,11 @@ def process_1am_lunch_recalc(db: Session):
     The buffer is split: 10% for late pre-booking, 10% for walk-in.
     """
     print("Executing 1 AM lunch recalculation...")
-    lunch_items = db.query(models.FoodItem).filter(models.FoodItem.meal_type == 'lunch').all()
+    lunch_items = db.query(models.FoodItem).filter(models.FoodItem.meal_type.in_(['lunch', 'snack'])).all()
     today = get_current_date()
     day_of_week = today.strftime('%A').lower()
+    event_day = _is_event_day(db, today)
+    manual_extra_pct = (event_day.lunch_snack_extra_pct if event_day else 0) or 0
 
     # Mark logic as run for today in the database
     db.add(models.LogicRun(logic_name='lunch_1am', last_run_date=today))
@@ -85,10 +125,10 @@ def process_1am_lunch_recalc(db: Session):
         # The base stock is now a live counter. We just read it.
         pre_order_count = stock.admin_base_stock
         print(f"Item '{item.name}' (ID: {item.id}) has {pre_order_count} pre-orders.")
-        # Calculate buffer using max of fixed-ratio and predicted demand uplift.
-        ratio_buffer = int(pre_order_count * 0.20)
-        predicted_buffer = _calculate_predicted_buffer(db, item.id, 'lunch', today, pre_order_count)
-        buffer = max(ratio_buffer, predicted_buffer)
+        history_multiplier = _event_multiplier_for_item(db, item.id, today) if event_day else 1.0
+        algo_pct = 20.0 * history_multiplier
+        total_pct = algo_pct + manual_extra_pct
+        buffer = math.ceil(pre_order_count * (total_pct / 100.0))
         # Buffer split: 10% for late pre-book (1am-11am), 10% for walk-in
         prebook_buffer = buffer // 2
         walkin_buffer = buffer - prebook_buffer
@@ -96,7 +136,11 @@ def process_1am_lunch_recalc(db: Session):
         # Update the buffer pools based on the live base stock count
         stock.prebook_pool = prebook_buffer
         stock.walkin_pool = walkin_buffer
-        print(f"Updated '{item.name}': Base={stock.admin_base_stock}, Pre-book Buffer={stock.prebook_pool}, Walk-in Buffer={stock.walkin_pool}")
+        print(
+            f"Updated '{item.name}': Base={stock.admin_base_stock}, "
+            f"AlgoPct={algo_pct:.2f}, ExtraPct={manual_extra_pct}, "
+            f"Pre-book Buffer={stock.prebook_pool}, Walk-in Buffer={stock.walkin_pool}"
+        )
 
     db.commit()
     print("1 AM lunch recalculation complete.")
@@ -106,15 +150,15 @@ def get_or_create_stock(db, food_item_id, day_of_week):
     from .models import FoodStock, FoodItem
     stock = db.query(FoodStock).filter_by(food_item_id=food_item_id, day_of_week=day_of_week).first()
     if not stock:
-        # If no stock record for the day, create one from the item's template values
-        item_template = db.query(FoodItem).filter_by(id=food_item_id).first()
+        # If no stock exists for the day, start from strict zero values.
+        # This avoids accidental carryover/template values being treated as real stock.
         stock = FoodStock(
             food_item_id=food_item_id,
             day_of_week=day_of_week,
-            admin_base_stock=item_template.admin_base_stock if item_template else 0,
-            prebook_pool=0,  # Pools start at 0 until calculated
+            admin_base_stock=0,
+            prebook_pool=0,
             walkin_pool=0,
-            breakfast_buffer=item_template.breakfast_buffer if item_template else 0
+            breakfast_buffer=0,
         )
         db.add(stock)
         db.flush() # Flush to get an ID, but don't commit the transaction.
@@ -166,9 +210,7 @@ def process_5pm_breakfast_recalc(db: Session):
         pre_order_count = stock.admin_base_stock
         print(f"Item '{item.name}' (ID: {item.id}) has {pre_order_count} pre-orders for tomorrow.")
 
-        ratio_buffer = int(pre_order_count * 0.20)
-        predicted_buffer = _calculate_predicted_buffer(db, item.id, 'breakfast', target_date, pre_order_count)
-        buffer = max(ratio_buffer, predicted_buffer)
+        buffer = math.ceil(pre_order_count * 0.20)
         prebook_buffer = buffer // 2
         walkin_buffer = buffer - prebook_buffer
 
@@ -210,7 +252,7 @@ def process_11am_lunch_rollover(db: Session):
     Moves any remaining pre-book items for lunch to the walk-in pool.
     """
     print("Executing 11 AM lunch rollover...")
-    lunch_items = db.query(models.FoodItem).filter(models.FoodItem.meal_type == 'lunch').all()
+    lunch_items = db.query(models.FoodItem).filter(models.FoodItem.meal_type.in_(['lunch', 'snack'])).all()
     today = get_current_date()
     day_of_week = today.strftime('%A').lower()
 
@@ -250,7 +292,7 @@ def process_10am_breakfast_clear(db: Session):
 def process_2pm_lunch_clear(db: Session):
     """Clears all unsold lunch stock at the end of the lunch period."""
     print("Executing 2 PM lunch stock clear...")
-    lunch_items = db.query(models.FoodItem).filter(models.FoodItem.meal_type == 'lunch').all()
+    lunch_items = db.query(models.FoodItem).filter(models.FoodItem.meal_type.in_(['lunch', 'snack'])).all()
     today = get_current_date()
     day_of_week = today.strftime('%A').lower()
 
@@ -345,11 +387,19 @@ TIME_TRIGGERS = [
 
 def is_working_day(target_date: datetime.date, db: Session) -> bool:
     """Check if a date is a working day (not a weekend and not a holiday)."""
-    if target_date.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+    day_entry = db.query(models.Holiday).filter(models.Holiday.date == target_date).first()
+
+    # Explicitly blocked holidays always remain non-working.
+    if day_entry and ((day_entry.day_type == 'holiday') or (day_entry.day_type is None)):
         return False
+
+    # Weekends are non-working unless explicitly overridden as event/working_day.
+    if target_date.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        return bool(day_entry and day_entry.day_type in {'event', 'working_day'})
+
     holiday = db.query(models.Holiday).filter(
         models.Holiday.date == target_date,
-        models.Holiday.day_type == 'holiday'
+        ((models.Holiday.day_type == 'holiday') | (models.Holiday.day_type.is_(None)))
     ).first()
     if holiday:
         return False

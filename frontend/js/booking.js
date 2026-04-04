@@ -14,6 +14,8 @@ let allowedFoodCount = 0;
 let selectedDate = null; // To store the selected booking date
 let currentViewMode = 'pre-order';
 let currentMealType = 'breakfast';
+let blockedHolidayDates = [];
+let eventDates = [];
 const SIT_IN_SLOTS = ["12:00:00", "12:25:00", "12:50:00", "13:15:00"]; // Match backend format
 let cachedUserFlags = null;
 
@@ -30,7 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function fetchLogicStatus() {
     try {
-        const res = await fetch('/stock-logic-status');
+        const res = await fetch('http://127.0.0.1:8000/stock-logic-status');
         if (res.ok) {
             logicStatus = await res.json();
         }
@@ -74,6 +76,14 @@ window.showFoodInfo = function(item) {
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
     const isTomorrow = selDate.getTime() === tomorrow.getTime();
+    const selYear = selDate.getFullYear();
+    const selMonth = String(selDate.getMonth() + 1).padStart(2, '0');
+    const selDay = String(selDate.getDate()).padStart(2, '0');
+    const selDateString = `${selYear}-${selMonth}-${selDay}`;
+    const isWeekendDate = selDate.getDay() === 0 || selDate.getDay() === 6;
+    const isHolidayDate = blockedHolidayDates.includes(selDateString);
+    const isEventDate = eventDates.includes(selDateString);
+    const isWorkingDay = !isHolidayDate && (!isWeekendDate || isEventDate);
 
     let isOver = false;
     let overMessage = "";
@@ -122,27 +132,29 @@ window.showFoodInfo = function(item) {
         }
     }
 
-    // Bypassing stock display for drinks entirely
-    if (isOver && isToday) {
-        stockHtml = `
-            <div style="background: #ffeaea; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 0.9rem; border: 1px solid #ffb3b3; text-align: left;">
-                <strong style="color: #d9534f; display: block; margin-bottom: 5px;">Service Ended</strong>
-                <span style="color: #333;">${overMessage}</span>
-            </div>
-        `;
-    } else if (showStock && item.category !== 'drink') {
-        // Only show stock info if there was an initial base stock (pre-orders),
-        // or if there is currently stock in the pool. This prevents showing "Sold Out"
-        // for items that had zero pre-orders and thus a zero-sized buffer.
-        if (item.admin_base_stock > 0 || stockCount > 0) {
-            const dayName = selDate.toLocaleDateString('en-US', { weekday: 'long' });
-            const stockMessage = stockCount > 0 ? `Only <strong>${stockCount}</strong> left` : 'Sold Out';
+    // Bypassing status/stock labels for non-working days and for drinks.
+    if (isWorkingDay) {
+        if (isOver && isToday) {
             stockHtml = `
-                <div style="background: #e9f5ff; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 0.9rem; border: 1px solid #b3d9ff; text-align: left;">
-                    <strong style="color: #0056b3; display: block; margin-bottom: 5px;">${stockPoolName} Stock for ${dayName}</strong>
-                    <span style="color: #333;">${stockMessage}</span>
+                <div style="background: #ffeaea; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 0.9rem; border: 1px solid #ffb3b3; text-align: left;">
+                    <strong style="color: #d9534f; display: block; margin-bottom: 5px;">Service Ended</strong>
+                    <span style="color: #333;">${overMessage}</span>
                 </div>
             `;
+        } else if (showStock && item.category !== 'drink') {
+            // Only show stock info if there was an initial base stock (pre-orders),
+            // or if there is currently stock in the pool. This prevents showing "Sold Out"
+            // for items that had zero pre-orders and thus a zero-sized buffer.
+            if (item.admin_base_stock > 0 || stockCount > 0) {
+                const dayName = selDate.toLocaleDateString('en-US', { weekday: 'long' });
+                const stockMessage = stockCount > 0 ? `Only <strong>${stockCount}</strong> left` : 'Sold Out';
+                stockHtml = `
+                    <div style="background: #e9f5ff; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 0.9rem; border: 1px solid #b3d9ff; text-align: left;">
+                        <strong style="color: #0056b3; display: block; margin-bottom: 5px;">${stockPoolName} Stock for ${dayName}</strong>
+                        <span style="color: #333;">${stockMessage}</span>
+                    </div>
+                `;
+            }
         }
     }
 
@@ -175,7 +187,7 @@ window.showFoodInfo = function(item) {
 
 async function loadFoodReviews(foodId) {
     try {
-        const response = await fetch(`/api/reviews/food/${foodId}`);
+        const response = await fetch(`http://127.0.0.1:8000/api/reviews/food/${foodId}`);
         const data = await response.json();
         
         const reviewsSection = document.getElementById(`reviews-section-${foodId}`);
@@ -274,7 +286,7 @@ async function submitReview(foodId) {
     }
     
     try {
-        const response = await fetch('/api/reviews', {
+        const response = await fetch('http://127.0.0.1:8000/api/reviews', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ admission_no, food_id: foodId, rating, review_text })
@@ -301,7 +313,7 @@ async function deleteReview(reviewId, foodId) {
     const admission_no = localStorage.getItem('admission_no');
     
     try {
-        const response = await fetch(`/api/reviews/${reviewId}?admission_no=${admission_no}`, {
+        const response = await fetch(`http://127.0.0.1:8000/api/reviews/${reviewId}?admission_no=${admission_no}`, {
             method: 'DELETE'
         });
         
@@ -453,17 +465,23 @@ async function initializeDatePicker() {
     
     tilesWrapper.innerHTML = "<span style='color:#888; font-size:0.9rem;'>Loading dates...</span>";
 
-    let holidayDates = [];
+    blockedHolidayDates = [];
+    eventDates = [];
     try {
         // Force a 2.5 second timeout so a bad server connection doesn't freeze the UI forever
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2500);
-        const response = await fetch('/api/holidays', { signal: controller.signal });
+        const response = await fetch('http://127.0.0.1:8000/api/holidays', { signal: controller.signal });
         clearTimeout(timeoutId);
         
         if (response.ok) {
             const holidays = await response.json();
-            holidayDates = holidays.map(h => h.date);
+            blockedHolidayDates = holidays
+                .filter(h => !h.day_type || h.day_type === 'holiday')
+                .map(h => h.date);
+            eventDates = holidays
+                .filter(h => h.day_type === 'event' || h.day_type === 'working_day')
+                .map(h => h.date);
         }
     } catch (err) {
         console.warn("Holiday fetch failed, proceeding with standard weekends.");
@@ -497,13 +515,14 @@ async function initializeDatePicker() {
         const day = String(date.getDate()).padStart(2, '0');
         const dateString = `${year}-${month}-${day}`;
 
+        const isEventDay = eventDates.includes(dateString);
         const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-        const isHoliday = holidayDates.includes(dateString);
+        const isHoliday = blockedHolidayDates.includes(dateString);
 
         const loopDateZero = new Date(date);
         loopDateZero.setHours(0,0,0,0);
         const isPast = loopDateZero < today;
-        const isDisabled = isWeekend || isHoliday || isPast;
+        const isDisabled = ((isWeekend && !isEventDay) || isHoliday || isPast);
 
         const radioId = `date-${dateString}`;
         const label = document.createElement('label');
@@ -828,7 +847,7 @@ async function refreshSeatList() {
 
     grid.innerHTML = "Loading...";
     try {
-        const response = await fetch(`/available-seats/${section}/${slot}/${selectedDate}`);
+        const response = await fetch(`http://127.0.0.1:8000/available-seats/${section}/${slot}/${selectedDate}`);
         const seats = await response.json();
 
         grid.innerHTML = ""; 
@@ -886,7 +905,7 @@ async function fetchMenu() {
         
         dayParam = targetDateForFetch.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
 
-        let url = '/food-items';
+        let url = 'http://127.0.0.1:8000/food-items';
         if (dayParam) {
             url += `?day=${dayParam}`;
         }
@@ -906,18 +925,11 @@ function renderMenu() {
     const mainPageContainer = document.getElementById('menu-container');
     const slotInput = document.getElementById('time-slot');
     const slot = slotInput ? slotInput.value : "";
-    const vegFilter = document.getElementById('veg-filter')?.value || 'all';
 
     console.log('Rendering menuItems:', menuItems);
     const filteredItems = menuItems.filter(item => {
         if (currentMealType === 'snack') return item.category === 'snack';
-        const matchesMealType = item.meal_type === currentMealType;
-        if (!matchesMealType) return false;
-
-        const isVeg = item.is_veg !== false;
-        if (vegFilter === 'veg') return isVeg;
-        if (vegFilter === 'non-veg') return !isVeg;
-        return true;
+        return item.meal_type === currentMealType;
     });
     console.log('Filtered menuItems:', filteredItems);
 
@@ -955,7 +967,6 @@ function renderMenu() {
                     ${item.image_url ? `<img src="${item.image_url}" alt="${item.name}" style="width: 100%; height: 120px; object-fit: cover; border-radius: 6px; cursor: pointer; margin-bottom: 10px;" onclick='showFoodInfo(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})'>` : ''}
                     <h3>${item.name} <button onclick='showFoodInfo(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})' style="background:none; border:none; cursor:pointer; color:#3498db; padding: 0; font-size: 1.1rem;" title="View Info">ℹ️</button></h3>
                     <p class="price">₹${item.price_full}</p>
-                    <p class="item-category">${item.is_veg === false ? 'Non-veg' : 'Veg'}</p>
                     ${planBtn}
                     ${infoMsg}
                 `;
@@ -1005,7 +1016,7 @@ function renderMenu() {
                     row.innerHTML = `
                         <div class="item-details">
                             <span class="item-name">${item.name} <button onclick='showFoodInfo(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})' style="background:none; border:none; cursor:pointer; color:#3498db; padding: 0; margin-right: 5px;" title="View Info">ℹ️</button>(₹${item.price_full})</span>
-                            <span class="item-meta">${item.category} | ${item.is_veg === false ? 'Non-veg' : 'Veg'}</span>
+                            <span class="item-meta">${item.category}</span>
                         </div>
                         <button class="add-btn" onclick='addItemToPlan(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})' ${isItemDisabled ? 'style="background-color: #ccc; cursor: not-allowed;"' : ''}>+</button>
                     `;
@@ -1277,7 +1288,7 @@ async function getCurrentUserFlags() {
     if (!admissionNo) return 0;
 
     try {
-        const response = await fetch(`/users/${admissionNo}/flags`);
+        const response = await fetch(`http://127.0.0.1:8000/users/${admissionNo}/flags`);
         if (!response.ok) return 0;
 
         const data = await response.json();
@@ -1342,7 +1353,7 @@ async function checkSlotAvailability() {
     const type = document.getElementById('order-type').value;
 
     if (type === 'parcel' && slot && selectedDate) {
-        const response = await fetch(`/check-capacity/${slot}/${selectedDate}`);
+        const response = await fetch(`http://127.0.0.1:8000/check-capacity/${slot}/${selectedDate}`);
         const data = await response.json();
         
         if (data.remaining <= 0) {
@@ -1390,8 +1401,6 @@ function completeDummyPayment() {
 
 async function processBooking() {
     const dropPointEl = document.getElementById('parcel-drop-point');
-    const parcelCountEl = document.getElementById('parcel-count');
-    const groupSize = parcelCountEl ? (parseInt(parcelCountEl.value, 10) || 1) : 1;
     const payload = {
         admission_no: localStorage.getItem("admission_no"),
         items: cart.map(cartItem => ({
@@ -1401,12 +1410,11 @@ async function processBooking() {
         scheduled_slot: document.getElementById('time-slot').value,
         order_type: document.getElementById('order-type').value,
         drop_point: dropPointEl ? dropPointEl.value : null,
-        group_size: groupSize,
         booking_date: selectedDate,
         seat_ids: selectedSeatIds
     };
 
-    const response = await fetch('/book-multiple', {
+    const response = await fetch('http://127.0.0.1:8000/book-multiple', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

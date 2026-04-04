@@ -10,10 +10,10 @@ load_dotenv()
 
 
 def validate_password(password: str) -> None:
-    if len(password.encode("utf-8")) > 72:
-        raise ValueError("Password is too long and cannot exceed 72 bytes.")
     if len(password) < 6:
         raise ValueError("Password must be at least 6 characters long.")
+    if len(password.encode("utf-8")) > 72:
+        raise ValueError("Password is too long and cannot exceed 72 bytes.")
 
 
 def hash_password(password: str) -> str:
@@ -31,7 +31,7 @@ def get_user(db, identifier: str):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Change a user's password in the database.")
+    parser = argparse.ArgumentParser(description="Reset a user's password in the database.")
     parser.add_argument("admission_no", help="User admission number or admin identifier")
     parser.add_argument(
         "new_password",
@@ -58,6 +58,8 @@ def main() -> int:
             return 1
 
         user.password = hash_password(new_password)
+        user.reset_token = None
+        user.reset_token_expiry = None
         db.commit()
         print(f"Password updated for user {args.admission_no}.")
         return 0

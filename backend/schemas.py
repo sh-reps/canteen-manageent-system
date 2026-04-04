@@ -59,7 +59,6 @@ class BookingCreate(BaseModel):
     scheduled_slot: str
     order_type: str
     drop_point: Optional[str] = None
-    group_size: Optional[int] = 1
     booking_date: date
     seat_ids: Optional[List[int]] = []
 
@@ -73,7 +72,6 @@ class FoodItemCreate(BaseModel):
     meal_type: str
     has_portions: bool = False
     is_countable: bool = False
-    is_veg: bool = True
 
 class FoodItemUpdate(BaseModel):
     name: Optional[str] = None
@@ -86,7 +84,6 @@ class FoodItemUpdate(BaseModel):
     has_portions: Optional[bool] = None
     is_walkin_only: Optional[bool] = None
     is_countable: Optional[bool] = None
-    is_veg: Optional[bool] = None
     admin_base_stock: Optional[int] = None
     prebook_pool: Optional[int] = None
     walkin_pool: Optional[int] = None
@@ -141,8 +138,6 @@ class BookingResponse(BaseModel):
     scheduled_slot: str
     order_type: str
     drop_point: Optional[str] = None
-    group_size: Optional[int] = 1
-    delivery_window: Optional[str] = None
     status: str
     items: List[BookedItemResponse]
     booked_seats: List[SeatReservationResponse]
@@ -153,8 +148,9 @@ class BookingResponse(BaseModel):
 
 class HolidayCreate(BaseModel):
     date: date
-    day_type: Optional[str] = "holiday"
+    day_type: str = "holiday"
     label: Optional[str] = None
+    lunch_snack_extra_pct: int = 0
 
 
 class Holiday(BaseModel):
@@ -162,6 +158,7 @@ class Holiday(BaseModel):
     date: date
     day_type: str
     label: Optional[str] = None
+    lunch_snack_extra_pct: int
 
     class Config:
         from_attributes = True
@@ -246,8 +243,3 @@ class NotificationCreate(BaseModel):
     target: str = "global"  # global | personal
     user_id: Optional[str] = None
     created_by: Optional[str] = None
-
-
-class GroupDeliveryEstimateRequest(BaseModel):
-    scheduled_slot: str
-    group_size: int

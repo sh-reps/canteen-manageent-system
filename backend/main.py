@@ -21,21 +21,14 @@ from datetime import date, datetime, timedelta
 from pydantic import BaseModel, EmailStr
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 
-import bcrypt
+from passlib.context import CryptContext
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def verify_password(plain_password, hashed_password):
-    if not hashed_password:
-        return False
-    try:
-        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
-    except ValueError:
-        return False
+    return pwd_context.verify(plain_password, hashed_password)
 
 def get_password_hash(password):
-    password_bytes = password.encode("utf-8")
-    if len(password_bytes) > 72:
-        raise ValueError("Password is too long and cannot exceed 72 bytes.")
-    return bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode("utf-8")
+    return pwd_context.hash(password)
 
 # --- Email Configuration ---
 # WARNING: Do NOT use this in production. Use environment variables.
@@ -84,14 +77,10 @@ try:
     print("[INFO] Applying schema updates...")
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE food_items ADD COLUMN IF NOT EXISTS is_countable BOOLEAN DEFAULT FALSE;"))
-        conn.execute(text("ALTER TABLE food_items ADD COLUMN IF NOT EXISTS is_veg BOOLEAN DEFAULT TRUE;"))
         conn.execute(text("ALTER TABLE booked_items ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;"))
         # Automatically add the section column to seats and safely assign the default value to existing rows
         conn.execute(text("ALTER TABLE seats ADD COLUMN IF NOT EXISTS section VARCHAR DEFAULT 'student';"))
         conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS drop_point VARCHAR;"))
-        conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS group_size INTEGER DEFAULT 1;"))
-        conn.execute(text("ALTER TABLE holidays ADD COLUMN IF NOT EXISTS day_type VARCHAR DEFAULT 'holiday';"))
-        conn.execute(text("ALTER TABLE holidays ADD COLUMN IF NOT EXISTS label VARCHAR;"))
         conn.execute(text("ALTER TABLE IF EXISTS notifications ADD COLUMN IF NOT EXISTS created_by VARCHAR;"))
         conn.execute(text("ALTER TABLE IF EXISTS notifications ADD COLUMN IF NOT EXISTS user_id VARCHAR;"))
         conn.execute(text("ALTER TABLE IF EXISTS notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMP;"))
@@ -105,15 +94,24 @@ try:
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_created_at ON bookings(created_at);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_date_status ON bookings(booking_date, status);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_date_type ON bookings(booking_date, order_type);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_seat_reservations_slot_date ON seat_reservations(time_slot, reservation_date);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_booked_items_booking_id ON booked_items(booking_id);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_food_stocks_food_day ON food_stocks(food_item_id, day_of_week);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_feedback_user_created ON system_feedback(user_id, created_at);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_holidays_date_type ON holidays(date, day_type);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reviews_food_created ON food_reviews(food_item_id, created_at);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_logic_runs_date_name ON logic_runs(last_run_date, logic_name);"))
+        conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS booking_total_value INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_percentage_applied INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_amount_paid INTEGER DEFAULT 0;"))
+        conn.execute(text("UPDATE bookings SET booking_total_value = 0 WHERE booking_total_value IS NULL;"))
+        conn.execute(text("UPDATE bookings SET deposit_percentage_applied = 0 WHERE deposit_percentage_applied IS NULL;"))
+        conn.execute(text("UPDATE bookings SET deposit_amount_paid = 0 WHERE deposit_amount_paid IS NULL;"))
+        conn.execute(text("ALTER TABLE holidays ADD COLUMN IF NOT EXISTS day_type VARCHAR DEFAULT 'holiday';"))
+        conn.execute(text("ALTER TABLE holidays ADD COLUMN IF NOT EXISTS label VARCHAR;"))
+        conn.execute(text("ALTER TABLE holidays ADD COLUMN IF NOT EXISTS lunch_snack_extra_pct INTEGER DEFAULT 0;"))
+        conn.execute(text("UPDATE holidays SET day_type = 'holiday' WHERE day_type IS NULL;"))
+        conn.execute(text("UPDATE holidays SET lunch_snack_extra_pct = 0 WHERE lunch_snack_extra_pct IS NULL;"))
         # Forcefully drop the old unique constraint to stop the 500 errors
         conn.execute(text("ALTER TABLE logic_runs DROP CONSTRAINT IF EXISTS logic_runs_logic_name_key;"))
     print("[INFO] Schema updates applied.")
@@ -217,10 +215,6 @@ async def serve_forgot_password():
 @app.get("/reset-password")
 async def serve_reset_password():
     return FileResponse(os.path.join(FRONTEND_DIR, "reset-password.html"))
-
-@app.get("/flagged_users")
-async def serve_flagged_users():
-    return FileResponse(os.path.join(FRONTEND_DIR, "flagged_users.html"))
 
 
 class TimeModel(BaseModel):
@@ -344,14 +338,6 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
         if normalized_drop_point not in valid_drop_points:
             raise HTTPException(status_code=400, detail="Invalid drop point selected.")
 
-    normalized_group_size = booking_data.group_size or 1
-    if normalized_group_size < 1:
-        normalized_group_size = 1
-    if booking_data.order_type == "parcel" and normalized_group_size > 4:
-        raise HTTPException(status_code=400, detail="Parcel group size cannot exceed 4.")
-    if booking_data.order_type == "sit-in":
-        normalized_group_size = 1
-
     # 2.5 Check if user has reached maximum flags (blocked from booking)
     if user_flags >= 5:
         raise HTTPException(status_code=403, detail="You have reached the maximum number of flags and cannot book orders. Please contact the admin to reset your flags.")
@@ -369,17 +355,18 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
             # For simplicity, assuming full price for all items in deposit calculation
             total_order_value += item.price_full * cart_item.quantity
     
-    deposit_amount = (total_order_value * deposit_percentage) / 100
+    deposit_amount = int(round((total_order_value * deposit_percentage) / 100.0))
     
     # 3. Check for Holidays and Weekends on the requested booking date
     booking_date = booking_data.booking_date
-    if booking_date.weekday() >= 5: # Monday is 0 and Sunday is 6
-        raise HTTPException(status_code=400, detail="Bookings are not available on weekends.")
+    day_entry = db.query(models.Holiday).filter(models.Holiday.date == booking_date).first()
+    is_weekend_override = bool(day_entry and day_entry.day_type in {'event', 'working_day'})
+
+    # Weekend bookings are blocked unless this date is explicitly configured as an event day.
+    if booking_date.weekday() >= 5 and not is_weekend_override: # Monday is 0 and Sunday is 6
+        raise HTTPException(status_code=400, detail="Bookings are not available on weekends unless marked as an event day.")
     
-    is_holiday = db.query(models.Holiday).filter(
-        models.Holiday.date == booking_date,
-        models.Holiday.day_type == 'holiday'
-    ).first()
+    is_holiday = bool(day_entry and ((day_entry.day_type == 'holiday') or (day_entry.day_type is None)))
     if is_holiday:
         raise HTTPException(status_code=400, detail="Bookings are not available on a holiday.")
     
@@ -390,9 +377,11 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
             scheduled_slot=booking_data.scheduled_slot,
             order_type=booking_data.order_type,
             drop_point=normalized_drop_point if booking_data.order_type == "parcel" else None,
-            group_size=normalized_group_size,
             booking_date=booking_date,
-            status="confirmed"
+            status="confirmed",
+            booking_total_value=int(total_order_value),
+            deposit_percentage_applied=int(deposit_percentage),
+            deposit_amount_paid=int(deposit_amount),
         )
         db.add(new_booking)
         db.flush()
@@ -488,14 +477,13 @@ def process_full_booking(booking_data: schemas.BookingCreate, db: Session = Depe
 
 @app.post("/register", status_code=status.HTTP_201_CREATED)
 def register_user(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
-    admission_no = user_data.admission_no.strip()
-    exists = db.query(models.User).filter(models.User.admission_no == admission_no).first()
+    exists = db.query(models.User).filter(models.User.admission_no == user_data.admission_no).first()
     if exists:
         raise HTTPException(status_code=400, detail="Admission number already registered")
     
     hashed_password = get_password_hash(user_data.password)
     new_user = models.User(
-        admission_no=admission_no,
+        admission_no=user_data.admission_no, 
         password=hashed_password,
         email=user_data.email,
         role=user_data.role # Assign the role from the request
@@ -506,9 +494,8 @@ def register_user(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/login")
 def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
-    admission_no = user_data.admission_no.strip()
     user = db.query(models.User).filter(
-        models.User.admission_no == admission_no
+        models.User.admission_no == user_data.admission_no
     ).first()
     
     if not user or not verify_password(user_data.password, user.password):
@@ -522,8 +509,7 @@ def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
 
 @app.post("/api/forgot-password")
 async def forgot_password(req: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
-    admission_no = req.admission_no.strip()
-    user = db.query(models.User).filter(models.User.admission_no == admission_no).first()
+    user = db.query(models.User).filter(models.User.admission_no == req.admission_no).first()
     
     # To prevent user enumeration, always return a generic success message.
     # The email is only sent if the user and email actually exist.
@@ -538,8 +524,7 @@ async def forgot_password(req: schemas.ForgotPasswordRequest, db: Session = Depe
         user.reset_token_expiry = datetime.utcnow() + timedelta(hours=1)
         db.commit()
 
-        app_base_url = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
-        reset_link = f"{app_base_url}/reset-password?token={token}"
+        reset_link = f"http://127.0.0.1:8000/reset-password?token={token}"
         html_body = f"""
         <p>Hello,</p>
         <p>You requested a password reset. Click the link below to reset your password (valid for 1 hour):</p>
@@ -580,69 +565,34 @@ def reset_password(req: schemas.ResetPasswordRequest, db: Session = Depends(get_
 
 @app.get("/api/holidays", response_model=List[schemas.Holiday])
 def get_holidays(db: Session = Depends(get_db)):
-    """Returns a list of holiday and special-day records."""
+    """Returns a list of all official holidays."""
     return db.query(models.Holiday).order_by(models.Holiday.date).all()
 
 @app.post("/api/holidays", status_code=status.HTTP_201_CREATED, response_model=schemas.Holiday)
 def create_holiday(holiday: schemas.HolidayCreate, db: Session = Depends(get_db)):
-    """Adds a holiday or special day."""
+    """Adds a blocked holiday or an event day."""
     exists = db.query(models.Holiday).filter(models.Holiday.date == holiday.date).first()
     if exists:
-        raise HTTPException(status_code=400, detail="This date is already configured.")
+        raise HTTPException(status_code=400, detail="This date already exists in the holiday/event calendar.")
 
-    day_type = (holiday.day_type or 'holiday').strip().lower()
-    if day_type not in {'holiday', 'special'}:
-        raise HTTPException(status_code=400, detail="day_type must be holiday or special")
-    
-    new_holiday = models.Holiday(date=holiday.date, day_type=day_type, label=holiday.label)
+    normalized_type = (holiday.day_type or "holiday").strip().lower()
+    if normalized_type not in {"holiday", "event", "working_day"}:
+        raise HTTPException(status_code=400, detail="day_type must be 'holiday', 'event', or 'working_day'.")
+
+    pct = int(holiday.lunch_snack_extra_pct or 0)
+    if pct < 0 or pct > 200:
+        raise HTTPException(status_code=400, detail="lunch_snack_extra_pct must be between 0 and 200.")
+
+    new_holiday = models.Holiday(
+        date=holiday.date,
+        day_type=normalized_type,
+        label=(holiday.label or "").strip() or None,
+        lunch_snack_extra_pct=pct if normalized_type == "event" else 0
+    )
     db.add(new_holiday)
     db.commit()
     db.refresh(new_holiday)
     return new_holiday
-
-
-@app.get("/api/admin/special-day-prediction")
-def get_special_day_prediction(target_date: date = Query(...), db: Session = Depends(get_db)):
-    """Predict demand multiplier for a special day from past special + recent regular orders."""
-    from_date = target_date - timedelta(days=21)
-
-    regular_orders = db.query(func.count(models.Booking.id)).filter(
-        models.Booking.booking_date >= from_date,
-        models.Booking.booking_date < target_date,
-        models.Booking.status != 'cancelled'
-    ).scalar() or 0
-
-    recent_days = max(1, (target_date - from_date).days)
-    regular_daily_avg = regular_orders / recent_days
-
-    past_special_dates = db.query(models.Holiday.date).filter(
-        models.Holiday.day_type == 'special',
-        models.Holiday.date < target_date
-    ).order_by(models.Holiday.date.desc()).limit(8).all()
-    special_dates = [d[0] for d in past_special_dates]
-
-    special_avg = 0
-    if special_dates:
-        special_order_counts = db.query(
-            models.Booking.booking_date,
-            func.count(models.Booking.id)
-        ).filter(
-            models.Booking.booking_date.in_(special_dates),
-            models.Booking.status != 'cancelled'
-        ).group_by(models.Booking.booking_date).all()
-        if special_order_counts:
-            special_avg = sum(int(r[1] or 0) for r in special_order_counts) / len(special_order_counts)
-
-    blended_forecast = regular_daily_avg if special_avg <= 0 else (0.6 * regular_daily_avg + 0.4 * special_avg)
-    multiplier = 1.0 if regular_daily_avg <= 0 else max(1.0, blended_forecast / regular_daily_avg)
-
-    return {
-        "target_date": str(target_date),
-        "regular_daily_avg": round(regular_daily_avg, 2),
-        "special_daily_avg": round(special_avg, 2),
-        "blended_forecast": round(blended_forecast, 2),
-        "recommended_stock_multiplier": round(multiplier, 2)
-    }
 
 @app.delete("/api/holidays/{holiday_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_holiday(holiday_id: int, db: Session = Depends(get_db)):
@@ -652,19 +602,6 @@ def delete_holiday(holiday_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Holiday not found.")
     db.delete(holiday)
     db.commit()
-
-
-def calculate_group_delivery_window(scheduled_slot: str, group_size: int) -> str:
-    """Estimate delivery window for parcel/group orders."""
-    try:
-        parsed = datetime.strptime((scheduled_slot or "")[:5], "%H:%M")
-    except Exception:
-        return "TBD"
-
-    prep_minutes = 10 if (group_size or 1) <= 2 else 20
-    start = parsed + timedelta(minutes=prep_minutes)
-    end = start + timedelta(minutes=10)
-    return f"{start.strftime('%H:%M')} - {end.strftime('%H:%M')}"
 
 #==========================================
 #  ORDER HISTORY ENDPOINT 
@@ -684,8 +621,6 @@ def get_order_history(admission_no: str, db: Session = Depends(get_db)):
         booking_dict = schemas.BookingResponse.from_orm(b).dict()
         if b.items and hasattr(b.items[0].food_item, 'meal_type'):
             booking_dict['meal_type'] = b.items[0].food_item.meal_type
-        if b.order_type == 'parcel':
-            booking_dict['delivery_window'] = calculate_group_delivery_window(b.scheduled_slot, b.group_size or 1)
         result.append(booking_dict)
     return result
 
@@ -712,9 +647,9 @@ def check_capacity(section: str, slot: str, booking_date: date, db: Session = De
 @app.post("/bookings/{booking_id}/cancel")
 def cancel_order(booking_id: int, db: Session = Depends(get_db)):
     """
-    Cancel a booking and return items to the prebook pool.
-    Breakfast: Can cancel before 7:00 AM
-    Lunch: Can cancel before 9:00 AM
+    Cancel a booking with tiered refund rules:
+    - Breakfast: 100% before 5:00 PM previous day, 50% from 5:00 PM to 6:59 AM, 20% from 7:00 AM onward.
+    - Lunch: 100% before 1:00 AM booking day, 50% from 1:00 AM to 10:59 AM, 20% from 11:00 AM onward.
     """
     # Get the booking
     booking = db.query(models.Booking).filter(models.Booking.id == booking_id).first()
@@ -731,28 +666,87 @@ def cancel_order(booking_id: int, db: Session = Depends(get_db)):
 
     meal_type = booking.items[0].food_item.meal_type
 
-    # Determine refund eligibility and where to return stock
+    # Calculate order value from booked items for refund amount reporting.
+    total_order_value = 0
+    for booked_item in booking.items:
+        food_item = booked_item.food_item or db.query(models.FoodItem).filter(models.FoodItem.id == booked_item.food_item_id).first()
+        unit_price = food_item.price_full if food_item and food_item.price_full is not None else 0
+        total_order_value += unit_price * booked_item.quantity
+
+    # Determine refund tier and where to return stock
     current_datetime = time_logic.get_current_datetime()
-    
-    refund_eligible = False
-    return_to_prebook = True
-    
+
+    # Hard stop: once service starts, cancellation is no longer allowed.
     if meal_type == 'breakfast':
-        cutoff_datetime = datetime.combine(booking.booking_date, datetime.strptime("07:00:00", "%H:%M:%S").time())
-        if current_datetime < cutoff_datetime:
-            refund_eligible = True
-            return_to_prebook = True
-        else:
-            refund_eligible = False
-            return_to_prebook = False  # After 7am on booking day, goes to walk-in
+        breakfast_start = datetime.combine(
+            booking.booking_date,
+            datetime.strptime("07:00:00", "%H:%M:%S").time(),
+        )
+        if current_datetime >= breakfast_start:
+            raise HTTPException(status_code=400, detail="Breakfast cancellation is closed after 7:00 AM on booking day.")
     elif meal_type == 'lunch':
-        cutoff_datetime = datetime.combine(booking.booking_date, datetime.strptime("09:00:00", "%H:%M:%S").time())
-        if current_datetime < cutoff_datetime:
-            refund_eligible = True
+        lunch_start = datetime.combine(
+            booking.booking_date,
+            datetime.strptime("11:00:00", "%H:%M:%S").time(),
+        )
+        if current_datetime >= lunch_start:
+            raise HTTPException(status_code=400, detail="Lunch cancellation is closed after 11:00 AM on booking day.")
+
+    refund_percentage = 100
+    return_to_prebook = True
+
+    if meal_type == 'breakfast':
+        first_cutoff = datetime.combine(
+            booking.booking_date - timedelta(days=1),
+            datetime.strptime("17:00:00", "%H:%M:%S").time(),
+        )
+        second_cutoff = datetime.combine(
+            booking.booking_date,
+            datetime.strptime("07:00:00", "%H:%M:%S").time(),
+        )
+
+        if current_datetime < first_cutoff:
+            refund_percentage = 100
+            return_to_prebook = True
+        elif current_datetime < second_cutoff:
+            refund_percentage = 50
             return_to_prebook = True
         else:
-            refund_eligible = False
-            return_to_prebook = False  # After 9am on booking day, goes to walk-in
+            refund_percentage = 20
+            return_to_prebook = False
+    elif meal_type == 'lunch':
+        first_cutoff = datetime.combine(
+            booking.booking_date,
+            datetime.strptime("01:00:00", "%H:%M:%S").time(),
+        )
+        second_cutoff = datetime.combine(
+            booking.booking_date,
+            datetime.strptime("11:00:00", "%H:%M:%S").time(),
+        )
+
+        if current_datetime < first_cutoff:
+            refund_percentage = 100
+            return_to_prebook = True
+        elif current_datetime < second_cutoff:
+            refund_percentage = 50
+            return_to_prebook = True
+        else:
+            refund_percentage = 20
+            return_to_prebook = False
+    else:
+        # Snacks/other categories default to late-stage cancellation behavior.
+        refund_percentage = 20
+        return_to_prebook = False
+
+    booking_paid_amount = booking.deposit_amount_paid if (booking.deposit_amount_paid is not None and booking.deposit_amount_paid > 0) else None
+
+    if booking_paid_amount is None:
+        booking_user = db.query(models.User).filter(models.User.admission_no == booking.user_id).first()
+        fallback_flags = (booking_user.flags or 0) if booking_user else 0
+        fallback_deposit_pct = calculate_deposit_percentage(fallback_flags)
+        booking_paid_amount = int(round((total_order_value * fallback_deposit_pct) / 100.0))
+
+    refund_amount = int(round((booking_paid_amount * refund_percentage) / 100.0))
 
     # Return items to correct pool
     day_of_week = booking.booking_date.strftime('%A').lower()
@@ -780,11 +774,20 @@ def cancel_order(booking_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     msg = "Order cancelled successfully!\n\n"
-    if refund_eligible:
-        msg += "✅ REFUND ISSUED: You cancelled before the kitchen cutoff time. Your items were returned to the pre-book pool."
+    if refund_percentage == 100:
+        msg += f"✅ REFUND ISSUED: 100% refund (Rs {refund_amount}). Your items were returned to the pre-book pool."
+    elif refund_percentage == 50:
+        msg += f"⚠️ PARTIAL REFUND: 50% refund (Rs {refund_amount}) after buffer calculation cutoff. Your items were returned to the pre-book pool."
     else:
-        msg += "❌ NO REFUND: You cancelled after the kitchen cutoff time. Your items have been sent to the walk-in counter to avoid waste."
-    return {"status": "success", "message": msg}
+        msg += f"⚠️ PARTIAL REFUND: 20% refund (Rs {refund_amount}) after service rollover cutoff. Your items were moved to the walk-in pool."
+    return {
+        "status": "success",
+        "message": msg,
+        "refund_percentage": refund_percentage,
+        "total_order_value": total_order_value,
+        "paid_amount": booking_paid_amount,
+        "refund_amount": refund_amount,
+    }
 
 #==========================================
 # Admin Routes
@@ -804,13 +807,7 @@ def get_all_bookings(date: str = Query(None), db: Session = Depends(get_db)):
         joinedload(models.Booking.booked_seats).joinedload(models.SeatReservation.seat)
     ).filter(models.Booking.booking_date == query_date).order_by(models.Booking.created_at.desc()).all()
     
-    result = []
-    for b in bookings:
-        row = schemas.BookingResponse.from_orm(b).dict()
-        if b.order_type == 'parcel':
-            row['delivery_window'] = calculate_group_delivery_window(b.scheduled_slot, b.group_size or 1)
-        result.append(row)
-    return result
+    return [schemas.BookingResponse.from_orm(b) for b in bookings]
 # main.py additions
 
 @app.get("/users")
@@ -917,7 +914,6 @@ async def create_food_item(request: Request, db: Session = Depends(get_db)):
         meal_type=data.get("meal_type"),
         has_portions=data.get("has_portions", False),
         is_countable=data.get("is_countable", False),
-        is_veg=data.get("is_veg", True),
         description=data.get("description", ""),
         image_url=data.get("image_url", ""),
         admin_base_stock=0,
@@ -1252,6 +1248,35 @@ def update_daily_stock(day: str, food_id: int, data: schemas.DailyStockUpdate, d
     db.commit()
     return {"status": "success", "message": "Daily stock updated successfully"}
 
+
+@app.post("/api/stock/{day}/reset-all")
+def reset_all_stock_for_day(day: str, db: Session = Depends(get_db)):
+    """Reset stock pools to zero for all items in the selected day."""
+    normalized_day = (day or "").strip().lower()
+    valid_days = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+    if normalized_day not in valid_days:
+        raise HTTPException(status_code=400, detail="Invalid day")
+
+    updated_rows = db.query(models.FoodStock).filter(
+        models.FoodStock.day_of_week == normalized_day
+    ).update(
+        {
+            "admin_base_stock": 0,
+            "prebook_pool": 0,
+            "walkin_pool": 0,
+            "breakfast_buffer": 0,
+        },
+        synchronize_session=False,
+    )
+
+    db.commit()
+    return {
+        "status": "success",
+        "day": normalized_day,
+        "updated_count": int(updated_rows or 0),
+        "message": f"Reset stock to 0 for {int(updated_rows or 0)} item(s) on {normalized_day}.",
+    }
+
 @app.post("/api/admin/reset-flags/{admission_no}", status_code=status.HTTP_200_OK)
 def reset_user_flags(admission_no: str, db: Session = Depends(get_db)):
     """Resets a user's flags to 0."""
@@ -1263,6 +1288,56 @@ def reset_user_flags(admission_no: str, db: Session = Depends(get_db)):
     user.flagged_at = None
     db.commit()
     return {"status": "success", "message": f"Flags for user {admission_no} have been reset."}
+
+
+@app.patch("/api/admin/flags/{admission_no}/adjust", status_code=status.HTTP_200_OK)
+def adjust_user_flags(admission_no: str, payload: dict = Body(...), db: Session = Depends(get_db)):
+    """Adjust a single user's flags by delta (+/-), clamped to [0, 5]."""
+    user = db.query(models.User).filter(models.User.admission_no == admission_no).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        delta = int(payload.get("delta", 0))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid delta")
+
+    if delta == 0:
+        raise HTTPException(status_code=400, detail="Delta must be non-zero")
+
+    current_flags = int(user.flags or 0)
+    new_flags = max(0, min(5, current_flags + delta))
+    user.flags = new_flags
+    if new_flags == 0:
+        user.flagged_at = None
+    elif delta > 0:
+        user.flagged_at = time_logic.get_current_datetime()
+
+    db.commit()
+    return {
+        "status": "success",
+        "admission_no": user.admission_no,
+        "flags": new_flags,
+        "message": f"Updated flags for {user.admission_no} to {new_flags}."
+    }
+
+
+@app.post("/api/admin/reset-flags-all", status_code=status.HTTP_200_OK)
+def reset_all_user_flags(db: Session = Depends(get_db)):
+    """Resets flags for all users."""
+    updated_rows = db.query(models.User).filter(
+        (models.User.flags != None) & (models.User.flags > 0)
+    ).update(
+        {"flags": 0, "flagged_at": None},
+        synchronize_session=False,
+    )
+
+    db.commit()
+    return {
+        "status": "success",
+        "updated_count": int(updated_rows or 0),
+        "message": f"Reset flags for {int(updated_rows or 0)} user(s)."
+    }
 
 @app.get("/api/admin/flagged-users", response_model=List[schemas.User])
 def get_flagged_users(db: Session = Depends(get_db)):
@@ -1829,111 +1904,3 @@ def get_user_notifications(admission_no: str, db: Session = Depends(get_db)):
             })
 
     return notifications
-
-
-@app.get("/api/users/{admission_no}/flag-summary")
-def get_user_flag_summary(admission_no: str, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.admission_no == admission_no).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    flags = user.flags or 0
-    return {
-        "admission_no": user.admission_no,
-        "flags": flags,
-        "deposit_percentage": calculate_deposit_percentage(flags),
-        "last_flagged_at": user.flagged_at,
-    }
-
-
-@app.post("/api/group-delivery-estimate")
-def get_group_delivery_estimate(payload: schemas.GroupDeliveryEstimateRequest):
-    group_size = payload.group_size or 1
-    return {
-        "delivery_window": calculate_group_delivery_window(payload.scheduled_slot, group_size)
-    }
-
-
-@app.get("/api/cashier/orders/{admission_no}")
-def get_cashier_orders_for_user(admission_no: str, booking_date: date = Query(None), db: Session = Depends(get_db)):
-    target_date = booking_date or time_logic.get_current_date()
-    bookings = db.query(models.Booking).options(
-        joinedload(models.Booking.items).joinedload(models.BookedItem.food_item),
-        joinedload(models.Booking.booked_seats).joinedload(models.SeatReservation.seat)
-    ).filter(
-        models.Booking.user_id == admission_no,
-        models.Booking.booking_date == target_date,
-        models.Booking.status == 'confirmed'
-    ).order_by(models.Booking.scheduled_slot.asc()).all()
-
-    rows = []
-    for b in bookings:
-        row = schemas.BookingResponse.from_orm(b).dict()
-        if b.order_type == 'parcel':
-            row['delivery_window'] = calculate_group_delivery_window(b.scheduled_slot, b.group_size or 1)
-        rows.append(row)
-    return rows
-
-
-@app.get("/api/cashier/order/{order_id}")
-def get_cashier_order(order_id: int, db: Session = Depends(get_db)):
-    order = db.query(models.Booking).options(
-        joinedload(models.Booking.items).joinedload(models.BookedItem.food_item),
-        joinedload(models.Booking.booked_seats).joinedload(models.SeatReservation.seat)
-    ).filter(models.Booking.id == order_id).first()
-
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    row = schemas.BookingResponse.from_orm(order).dict()
-    if order.order_type == 'parcel':
-        row['delivery_window'] = calculate_group_delivery_window(order.scheduled_slot, order.group_size or 1)
-    return row
-
-
-@app.get("/api/admin/menu-analytics")
-def get_menu_analytics(days: int = Query(30, ge=7, le=180), db: Session = Depends(get_db)):
-    end_date = time_logic.get_current_date()
-    start_date = end_date - timedelta(days=days)
-
-    rows = db.query(
-        models.FoodItem.id,
-        models.FoodItem.name,
-        models.FoodItem.category,
-        models.FoodItem.meal_type,
-        func.coalesce(func.sum(models.BookedItem.quantity), 0).label('qty_sold'),
-        func.coalesce(func.sum(models.BookedItem.quantity * models.FoodItem.price_full), 0).label('revenue')
-    ).outerjoin(
-        models.BookedItem, models.BookedItem.food_item_id == models.FoodItem.id
-    ).outerjoin(
-        models.Booking, models.Booking.id == models.BookedItem.booking_id
-    ).filter(
-        (models.Booking.booking_date == None) |
-        ((models.Booking.booking_date >= start_date) & (models.Booking.booking_date <= end_date) & (models.Booking.status != 'cancelled'))
-    ).group_by(
-        models.FoodItem.id,
-        models.FoodItem.name,
-        models.FoodItem.category,
-        models.FoodItem.meal_type
-    ).order_by(func.coalesce(func.sum(models.BookedItem.quantity), 0).desc()).all()
-
-    review_stats = db.query(
-        models.FoodReview.food_item_id,
-        func.coalesce(func.avg(models.FoodReview.rating), 0),
-        func.count(models.FoodReview.id)
-    ).group_by(models.FoodReview.food_item_id).all()
-    review_map = {r[0]: {"avg_rating": round(float(r[1] or 0), 2), "review_count": int(r[2] or 0)} for r in review_stats}
-
-    return [
-        {
-            "food_item_id": int(r[0]),
-            "name": r[1],
-            "category": r[2],
-            "meal_type": r[3],
-            "quantity_sold": int(r[4] or 0),
-            "revenue": int(r[5] or 0),
-            "avg_rating": review_map.get(int(r[0]), {}).get("avg_rating", 0),
-            "review_count": review_map.get(int(r[0]), {}).get("review_count", 0),
-        }
-        for r in rows
-    ]

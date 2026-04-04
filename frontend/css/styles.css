@@ -682,25 +682,6 @@ select, input[type="text"], input[type="password"], input[type="email"], input[t
     gap: 12px;
 }
 
-.nav-group-title {
-    cursor: pointer;
-    opacity: 0.85;
-    font-weight: 700;
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    margin-top: 8px;
-    padding-top: 14px;
-    padding-bottom: 10px;
-}
-
-.nav-group-title:hover {
-    background: rgba(255, 255, 255, 0.06);
-}
-
-.nav-sub-item {
-    padding-left: 42px;
-    font-size: 0.95rem;
-}
-
 .nav-item:hover {
     background: #34495e;
 }

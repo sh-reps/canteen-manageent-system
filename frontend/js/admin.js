@@ -1,9 +1,5 @@
-var API_BASE = "";
+var API_BASE = "http://127.0.0.1:8000";
 const DEBUG_NAV_PREF_KEY = 'admin_debug_nav_enabled';
-let cashierScannerStream = null;
-let cashierScannerActive = false;
-let cashierScannerFrameHandle = null;
-let cashierScannerDetector = null;
 
 function isDebugNavEnabled() {
     return localStorage.getItem(DEBUG_NAV_PREF_KEY) !== '0';
@@ -67,14 +63,11 @@ async function completeOrder(orderId) {
 
         if (response.ok) {
             loadAllOrders(); // Refresh the order list
-            return true;
         } else {
             alert("Failed to update order");
-            return false;
         }
     } catch (err) {
         console.error("Error completing order:", err);
-        return false;
     }
 }
 
@@ -105,119 +98,6 @@ async function markOrderNotCollected(orderId) {
 // Utility to open/close modals
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
-
-function renderCashierOrderDetails(order) {
-    const container = document.getElementById('cashier-order-details');
-    if (!container) return;
-
-    const items = (order.items || []).map(item => item.food_item?.name || 'Unknown').join(', ');
-    const location = (order.booked_seats && order.booked_seats.length > 0)
-        ? order.booked_seats.map(seat => `T${seat.seat.table_number}-S${seat.seat.seat_number}`).join(', ')
-        : 'Parcel';
-
-    container.innerHTML = `
-        <div class="menu-item-card">
-            <h4>Order #${order.id}</h4>
-            <p><strong>User:</strong> ${order.user_id}</p>
-            <p><strong>Date:</strong> ${order.booking_date}</p>
-            <p><strong>Slot:</strong> ${order.scheduled_slot}</p>
-            <p><strong>Items:</strong> ${items || 'No items'}</p>
-            <p><strong>Location:</strong> ${location}${order.drop_point ? ` (${order.drop_point})` : ''}</p>
-            ${order.delivery_window ? `<p class="item-category">Delivery Window: ${order.delivery_window}</p>` : ''}
-            <p><strong>Status:</strong> ${order.status}</p>
-            <div class="btn-group" style="margin-top:12px; flex-wrap:wrap;">
-                ${order.status === 'confirmed' ? `<button class="btn-confirm" onclick="completeCashierOrder(${order.id})">Complete Order</button>` : `<span class="item-category">Order already ${order.status}.</span>`}
-            </div>
-        </div>
-    `;
-}
-
-async function completeCashierOrder(orderId) {
-    const success = await completeOrder(orderId);
-    if (success) {
-        lookupCashierOrders();
-    }
-}
-
-function stopCashierScanner() {
-    cashierScannerActive = false;
-    if (cashierScannerFrameHandle) {
-        cancelAnimationFrame(cashierScannerFrameHandle);
-        cashierScannerFrameHandle = null;
-    }
-    if (cashierScannerStream) {
-        cashierScannerStream.getTracks().forEach(track => track.stop());
-        cashierScannerStream = null;
-    }
-}
-
-function closeCashierScanner() {
-    stopCashierScanner();
-    closeModal('cashier-scanner-modal');
-}
-
-async function openCashierScanner() {
-    const modal = document.getElementById('cashier-scanner-modal');
-    const video = document.getElementById('cashier-scanner-video');
-    const status = document.getElementById('cashier-scanner-status');
-    if (!modal || !video || !status) return;
-
-    stopCashierScanner();
-    modal.style.display = 'flex';
-    status.textContent = 'Requesting camera access...';
-
-    try {
-        cashierScannerStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: 'environment' } },
-            audio: false
-        });
-        video.srcObject = cashierScannerStream;
-        await video.play();
-
-        if ('BarcodeDetector' in window) {
-            cashierScannerDetector = new BarcodeDetector({ formats: ['code_128', 'code_39', 'ean_13', 'ean_8', 'qr_code'] });
-            cashierScannerActive = true;
-            status.textContent = 'Camera ready. Scan the order barcode.';
-            scanCashierFrame();
-        } else {
-            status.textContent = 'Camera open, but this browser cannot decode barcodes. Enter the barcode manually.';
-        }
-    } catch (error) {
-        console.error(error);
-        status.textContent = 'Unable to open camera. Check permissions and try again.';
-        stopCashierScanner();
-    }
-}
-
-async function scanCashierFrame() {
-    const video = document.getElementById('cashier-scanner-video');
-    const status = document.getElementById('cashier-scanner-status');
-    if (!cashierScannerActive || !cashierScannerDetector || !video) return;
-
-    try {
-        const barcodes = await cashierScannerDetector.detect(video);
-        if (barcodes && barcodes.length > 0) {
-            const barcodeValue = (barcodes[0].rawValue || '').trim();
-            if (barcodeValue) {
-                cashierScannerActive = false;
-                if (status) status.textContent = `Barcode detected: ${barcodeValue}`;
-                const input = document.getElementById('cashier-barcode-input');
-                if (input) input.value = barcodeValue;
-                stopCashierScanner();
-                closeModal('cashier-scanner-modal');
-                await lookupCashierOrders();
-                return;
-            }
-        }
-    } catch (error) {
-        // Keep scanning; the barcode may not be in frame yet.
-        console.debug('Barcode scan retry:', error);
-    }
-
-    if (cashierScannerActive) {
-        cashierScannerFrameHandle = requestAnimationFrame(scanCashierFrame);
-    }
-}
 
 // Save New User
 async function saveUser() {
@@ -262,8 +142,7 @@ async function saveFood() {
         category: document.getElementById('food-category').value,
         meal_type: document.getElementById('food-meal-type').value,
         has_portions: has_portions,
-        is_countable: is_countable,
-        is_veg: document.getElementById('food-is-veg')?.checked ?? true
+        is_countable: is_countable
     };
 
     let url = `${API_BASE}/food-items`;
@@ -295,10 +174,6 @@ function showSection(sectionId) {
     if (sectionId === 'clock' && !isDebugNavEnabled()) {
         return;
     }
-
-    if (sectionId !== 'cashier') {
-        closeCashierScanner();
-    }
     
     // 1. Hide all sections
     document.querySelectorAll('.admin-section').forEach(s => s.style.display = 'none');
@@ -315,6 +190,7 @@ function showSection(sectionId) {
     // 4. Load Data
     if (sectionId === 'orders') loadAllOrders();
     if (sectionId === 'users') loadUsers();
+    if (sectionId === 'flagged-users') loadFlaggedUsers();
     if (sectionId === 'menu') loadFoodCatalog();
     if (sectionId === 'stock') loadDailyStock();
     if (sectionId === 'holidays') loadHolidays();
@@ -323,13 +199,6 @@ function showSection(sectionId) {
         toggleNotificationTarget();
         loadAdminNotifications();
     }
-    if (sectionId === 'cashier') {
-        const cashierInput = document.getElementById('cashier-barcode-input');
-        const cashierDetails = document.getElementById('cashier-order-details');
-        if (cashierInput) cashierInput.value = '';
-        if (cashierDetails) cashierDetails.innerHTML = '';
-    }
-    if (sectionId === 'analytics') loadMenuAnalytics();
     if (sectionId === 'profits') {
         setMonthlyChartStatus('Loading monthly chart...', true, false);
         // Set today's date as default in expense-date field
@@ -342,6 +211,7 @@ function showSection(sectionId) {
 
 document.addEventListener('DOMContentLoaded', () => {
     applyDebugNavVisibility();
+    toggleEventPercentageField();
 
     // Initial call once the script loads
     showSection('orders'); 
@@ -350,6 +220,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const ordersDateInput = document.getElementById('admin-orders-date');
     if (ordersDateInput) {
         ordersDateInput.addEventListener('change', loadAllOrders);
+    }
+
+    const resetAllStockBtn = document.getElementById('reset-all-stock-btn');
+    if (resetAllStockBtn) {
+        resetAllStockBtn.addEventListener('click', resetAllStockForSelectedDay);
     }
 });
 
@@ -392,7 +267,6 @@ async function loadAllOrders() {
                 <td>${order.user_id}</td>
                 <td>${order.items && order.items.length > 0 ? order.items.map(i => i.food_item ? i.food_item.name : 'Unknown/Deleted Item').join(", ") : 'No items'}</td>
                 <td>
-                    ${order.delivery_window ? `<div style="font-size:0.8rem; color:#2ecc71; margin-bottom:6px;">Delivery: ${order.delivery_window}</div>` : ''}
                     ${order.status === 'collected' 
                         ? '<span style="color: #2ecc71; font-weight: bold;">✓ Collected</span>' 
                         : order.status === 'not_collected'
@@ -411,19 +285,8 @@ async function loadAllOrders() {
 async function loadUsers() {
     const tbody = document.getElementById('admin-users-body');
     if (!tbody) return; 
-    
-    // Auto-inject the missing 'Email' header into the HTML table
-    const table = tbody.closest('table');
-    if (table) {
-        const theadTr = table.querySelector('thead tr');
-        if (theadTr && theadTr.children.length === 3) {
-            const emailTh = document.createElement('th');
-            emailTh.textContent = 'Email';
-            theadTr.insertBefore(emailTh, theadTr.children[2]);
-        }
-    }
 
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">Loading users...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Loading users...</td></tr>';
 
     try {
         const response = await fetch(`${API_BASE}/users`, {
@@ -436,11 +299,13 @@ async function loadUsers() {
         const users = await response.json();
 
         if (!Array.isArray(users) || users.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">No users found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No users found.</td></tr>';
             return;
         }
 
         tbody.innerHTML = users.map(u => {
+            const flags = u.flags || 0;
+            const badgeClass = flags >= 5 ? 'flag-badge max' : 'flag-badge';
             const emailDisplay = u.email 
                 ? `<a href="mailto:${u.email}" class="user-email-link">${u.email}</a>` 
                 : '<span style="color: #888; font-style: italic;">Not Set</span>';
@@ -450,7 +315,11 @@ async function loadUsers() {
                 <td><span class="user-id">${u.admission_no}</span></td>
                 <td><span class="user-role">${u.role}</span></td>
                 <td>${emailDisplay}</td>
+                <td style="text-align:center;"><span class="${badgeClass}">${flags}/5</span></td>
                 <td>
+                    <button class="btn-action" onclick="adjustUserFlags('${u.admission_no}', -1)">-1 Flag</button>
+                    <button class="btn-confirm" onclick="adjustUserFlags('${u.admission_no}', 1)">+1 Flag</button>
+                    <button class="btn-danger" onclick="resetFlagsForUser('${u.admission_no}')">Reset Flags</button>
                     <button class="btn-action" onclick="editUserEmail('${u.admission_no}', '${u.email || ''}')">Edit Email</button>
                     <button class="btn-danger" onclick="deleteUser('${u.admission_no}')">Delete</button>
                 </td>
@@ -458,7 +327,7 @@ async function loadUsers() {
         }).join('');
     } catch (err) { 
         console.error("Error loading users:", err); 
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: red;">Failed to load users.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: red;">Failed to load users.</td></tr>';
     }
 }
 
@@ -485,7 +354,7 @@ async function editUserEmail(admissionNo, currentEmail) {
 
 // --- MENU CATALOG MANAGEMENT ---
 function openFoodModal(item = null) {
-    const data = item || { id: null, name: '', price_full: '', price_half: '', category: 'meal', meal_type: 'breakfast', has_portions: false, is_countable: false, is_veg: true, description: '', image_url: '' };
+    const data = item || { id: null, name: '', price_full: '', price_half: '', category: 'meal', meal_type: 'breakfast', has_portions: false, is_countable: false, description: '', image_url: '' };
     // Dynamically inject hidden ID field if missing
     let idField = document.getElementById('edit-food-item-id');
     if (!idField) {
@@ -555,9 +424,6 @@ function openFoodModal(item = null) {
     document.getElementById('food-meal-type').value = data.meal_type || 'breakfast';
     document.getElementById('food-has-portions').checked = data.has_portions || false;
     document.getElementById('food-is-countable').checked = data.is_countable || false;
-    if (document.getElementById('food-is-veg')) {
-        document.getElementById('food-is-veg').checked = (data.is_veg !== false);
-    }
 
     openModal('menu-modal');
 }
@@ -579,8 +445,7 @@ async function loadFoodCatalog() {
             <p class="item-category" style="font-weight: bold;">
                 Price: ₹${item.price_full} ${item.has_portions ? ` (Half: ₹${item.price_half || 0})` : ''} | 
                 Portions: ${item.has_portions ? 'Yes' : 'No'} |
-                Countable: ${item.is_countable ? 'Yes' : 'No'} |
-                Type: ${item.is_veg === false ? 'Non-veg' : 'Veg'}
+                Countable: ${item.is_countable ? 'Yes' : 'No'}
             </p>
             <div style="margin-top: 10px;">
                 <button class="btn-action" onclick='openFoodModal(${JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;")})'>
@@ -640,6 +505,39 @@ async function loadDailyStock() {
 
         container.innerHTML = itemHtml;
     } catch (err) { console.error("Menu load failed", err); }
+}
+
+window.resetAllStockForSelectedDay = async function resetAllStockForSelectedDay() {
+    const dayInput = document.getElementById('admin-stock-day');
+    const day = dayInput ? dayInput.value : 'monday';
+
+    if (!confirm(`⚠️ ARE YOU SURE?\n\nThis will reset base, pre-book, and walk-in stock to 0 for all items on ${day}. This cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/stock/${day}/reset-all`, {
+            method: 'POST',
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache' }
+        });
+
+        let data = null;
+        try {
+            data = await response.json();
+        } catch {
+            data = null;
+        }
+        if (!response.ok) {
+            throw new Error((data && data.detail) ? data.detail : `Failed to reset stock (${response.status})`);
+        }
+
+        alert(`✅ ${(data && data.message) ? data.message : 'Stock reset completed.'}`);
+        loadDailyStock();
+    } catch (error) {
+        console.error('Reset all stock failed:', error);
+        alert(`❌ ${error.message}`);
+    }
 }
 
 // Set buffer for breakfast item for tomorrow
@@ -938,7 +836,11 @@ async function loadHolidays() {
         const holidays = await response.json();
         list.innerHTML = holidays.map(h => `
             <li>
-                <span>${h.date} - <strong>${h.day_type || 'holiday'}</strong>${h.label ? ` (${h.label})` : ''}</span>
+                <span>
+                    ${h.date} - ${((h.day_type || 'holiday') === 'working_day' ? 'WORKING_DAY' : (h.day_type || 'holiday').toUpperCase())}
+                    ${h.label ? `(${h.label})` : ''}
+                    ${(h.day_type === 'event' && h.lunch_snack_extra_pct > 0) ? `| +${h.lunch_snack_extra_pct}% lunch/snack` : ''}
+                </span>
                 <button class="btn-danger" onclick="deleteHoliday(${h.id})">
                     <i class="fas fa-trash"></i>
                 </button>
@@ -951,10 +853,17 @@ async function loadHolidays() {
 
 async function addHoliday() {
     const dateInput = document.getElementById('holiday-date');
-    const typeInput = document.getElementById('holiday-type');
+    const dayTypeInput = document.getElementById('holiday-day-type');
     const labelInput = document.getElementById('holiday-label');
+    const extraPctInput = document.getElementById('holiday-extra-pct');
     const date = dateInput.value;
+    const dayType = dayTypeInput ? dayTypeInput.value : 'holiday';
+    const label = labelInput ? labelInput.value.trim() : '';
+    const extraPct = dayType === 'event' ? parseInt(extraPctInput?.value || '0', 10) : 0;
     if (!date) return alert("Please select a date");
+    if (Number.isNaN(extraPct) || extraPct < 0 || extraPct > 200) {
+        return alert("Extra percentage must be between 0 and 200");
+    }
 
     try {
         const response = await fetch(`${API_BASE}/api/holidays`, {
@@ -962,18 +871,20 @@ async function addHoliday() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 date,
-                day_type: typeInput ? typeInput.value : 'holiday',
-                label: labelInput ? labelInput.value : null
+                day_type: dayType,
+                label,
+                lunch_snack_extra_pct: extraPct
             })
         });
 
         if (response.ok) {
             dateInput.value = "";
             if (labelInput) labelInput.value = "";
+            if (extraPctInput) extraPctInput.value = "0";
             loadHolidays();
         } else {
             const err = await response.json();
-            alert(err.detail || "Failed to add holiday");
+            alert(err.detail || "Failed to save calendar day");
         }
     } catch (err) {
         console.error("Error adding holiday:", err);
@@ -1605,72 +1516,122 @@ async function loadAdminNotifications() {
     }
 }
 
-async function runSpecialDayPrediction() {
-    const date = document.getElementById('special-predict-date')?.value;
-    const resultEl = document.getElementById('special-day-prediction-result');
-    if (!date) return alert('Please select a target date');
-    if (resultEl) resultEl.textContent = 'Calculating...';
-
-    try {
-        const response = await fetch(`${API_BASE}/api/admin/special-day-prediction?target_date=${date}`);
-        if (!response.ok) throw new Error('Prediction request failed');
-        const data = await response.json();
-        if (resultEl) {
-            resultEl.textContent = `Recommended multiplier x${data.recommended_stock_multiplier} (Regular avg ${data.regular_daily_avg}, Special avg ${data.special_daily_avg})`;
-        }
-    } catch (error) {
-        console.error(error);
-        if (resultEl) resultEl.textContent = 'Failed to calculate prediction';
-    }
+function calculateDepositPercentage(flags) {
+    if (flags <= 1) return 10;
+    if (flags === 2) return 30;
+    if (flags === 3) return 50;
+    if (flags === 4) return 75;
+    return 100;
 }
 
-async function lookupCashierOrders() {
-    const barcode = document.getElementById('cashier-barcode-input')?.value?.trim();
-    const container = document.getElementById('cashier-order-details');
-    if (!barcode) return alert('Scan or enter order barcode');
-    if (!container) return;
-
-    container.innerHTML = '<p>Loading...</p>';
-    try {
-        const response = await fetch(`${API_BASE}/api/cashier/order/${barcode}`);
-        if (!response.ok) throw new Error('No order found');
-        const order = await response.json();
-        renderCashierOrderDetails(order);
-    } catch (error) {
-        console.error(error);
-        container.innerHTML = '<p style="color:red;">Unable to fetch the scanned order.</p>';
-    }
-}
-
-async function loadMenuAnalytics() {
-    const days = parseInt(document.getElementById('analytics-days')?.value || '30', 10);
-    const tbody = document.getElementById('menu-analytics-body');
+async function loadFlaggedUsers() {
+    const tbody = document.getElementById('admin-flagged-users-body');
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center">Loading...</td></tr>';
+
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 20px;">Loading flagged users...</td></tr>';
 
     try {
-        const response = await fetch(`${API_BASE}/api/admin/menu-analytics?days=${days}`);
-        if (!response.ok) throw new Error('Failed to fetch analytics');
-        const rows = await response.json();
+        const response = await fetch(`${API_BASE}/api/admin/flagged-users`, {
+            method: 'GET',
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache' }
+        });
 
-        if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center">No analytics data yet.</td></tr>';
+        if (!response.ok) throw new Error('Failed to fetch flagged users');
+
+        const users = await response.json();
+        if (!Array.isArray(users) || users.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 20px;">No flagged users found.</td></tr>';
             return;
         }
 
-        tbody.innerHTML = rows.map(row => `
+        tbody.innerHTML = users.map(user => {
+            const flags = user.flags || 0;
+            const depositPercentage = calculateDepositPercentage(flags);
+            const badgeClass = flags >= 5 ? 'flag-badge max' : 'flag-badge';
+            const depositColor = depositPercentage === 100 ? '#c0392b' : '#e67e22';
+
+            return `
             <tr>
-                <td>${row.name}</td>
-                <td>${row.category}</td>
-                <td>${row.meal_type}</td>
-                <td>${row.quantity_sold}</td>
-                <td>Rs ${row.revenue}</td>
-                <td>${row.avg_rating}</td>
-                <td>${row.review_count}</td>
-            </tr>
-        `).join('');
+                <td>${user.admission_no}</td>
+                <td>${user.email || 'N/A'}</td>
+                <td>${user.role}</td>
+                <td style="text-align:center;"><span class="${badgeClass}">${flags}/5</span></td>
+                <td style="text-align:center; font-weight: bold; color: ${depositColor}">${depositPercentage}%</td>
+                <td>${user.flagged_at ? new Date(user.flagged_at).toLocaleString() : 'N/A'}</td>
+                <td style="text-align:center;">
+                    <button class="btn-action" style="padding: 6px 10px; margin-right: 6px;" onclick="adjustUserFlags('${user.admission_no}', -1)">-1</button>
+                    <button class="btn-confirm" style="padding: 6px 10px; margin-right: 6px;" onclick="adjustUserFlags('${user.admission_no}', 1)">+1</button>
+                    <button class="btn-danger" style="padding: 6px 12px;" onclick="resetFlagsForUser('${user.admission_no}')">Reset Flags</button>
+                </td>
+            </tr>`;
+        }).join('');
     } catch (error) {
-        console.error(error);
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="color:red;">Failed to load analytics.</td></tr>';
+        console.error('Error loading flagged users:', error);
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 20px; color: #e74c3c;">Error loading flagged users.</td></tr>';
     }
+}
+
+async function resetFlagsForUser(admissionNo) {
+    if (!confirm(`Are you sure you want to reset flags for user ${admissionNo}?`)) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/admin/reset-flags/${admissionNo}`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Failed to reset flags');
+
+        loadFlaggedUsers();
+    } catch (error) {
+        console.error('Error resetting flags:', error);
+        alert(`Failed to reset flags: ${error.message}`);
+    }
+}
+
+async function resetAllFlags() {
+    if (!confirm('⚠️ ARE YOU SURE?\n\nThis will reset flags for all users. This cannot be undone.')) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/admin/reset-flags-all`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Failed to reset all flags');
+
+        alert(`✅ ${data.message}`);
+        loadFlaggedUsers();
+        loadUsers();
+    } catch (error) {
+        console.error('Error resetting all flags:', error);
+        alert(`Failed to reset all flags: ${error.message}`);
+    }
+}
+
+async function adjustUserFlags(admissionNo, delta) {
+    try {
+        const response = await fetch(`${API_BASE}/api/admin/flags/${admissionNo}/adjust`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ delta })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Failed to adjust flags');
+
+        loadFlaggedUsers();
+        loadUsers();
+    } catch (error) {
+        console.error('Error adjusting flags:', error);
+        alert(`Failed to adjust flags: ${error.message}`);
+    }
+}
+
+function toggleEventPercentageField() {
+    const dayTypeInput = document.getElementById('holiday-day-type');
+    const wrap = document.getElementById('event-percentage-wrap');
+    if (!dayTypeInput || !wrap) return;
+    wrap.style.display = dayTypeInput.value === 'event' ? 'block' : 'none';
 }

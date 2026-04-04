@@ -1,7 +1,7 @@
 import os
 import sys
-import bcrypt
 from sqlalchemy.orm import sessionmaker
+from passlib.context import CryptContext
 
 # Ensure backend can be imported
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -12,9 +12,7 @@ from backend.models import User
 def seed_test_users():
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     db = SessionLocal()
-
-    def hash_pw(password: str) -> str:
-        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     
     try:
         print("--- STARTING TEST DATA SEED ---")
@@ -25,17 +23,17 @@ def seed_test_users():
         
         # 1. Admin
         if "admin" not in existing_users:
-            users_to_add.append(User(admission_no="admin", password=hash_pw("admin123"), role="admin"))
+            users_to_add.append(User(admission_no="admin", password=pwd_context.hash("admin123"), role="admin"))
             
         # 2. Students (student1 to student50)
-        student_pw = hash_pw("student123")
+        student_pw = pwd_context.hash("student123")
         for i in range(1, 51):
             adm_no = f"student{i}"
             if adm_no not in existing_users:
                 users_to_add.append(User(admission_no=adm_no, password=student_pw, role="student"))
                 
         # 3. Staff (staff1 to staff20)
-        staff_pw = hash_pw("staff123")
+        staff_pw = pwd_context.hash("staff123")
         for i in range(1, 21):
             adm_no = f"staff{i}"
             if adm_no not in existing_users:

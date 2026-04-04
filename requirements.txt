@@ -1,9 +1,0 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-psycopg2-binary
-bcrypt
-pydantic[email]
-fastapi-mail
-python-multipart
-alembic

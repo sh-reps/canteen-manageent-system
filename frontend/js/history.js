@@ -1,29 +1,43 @@
 
 
 // frontend/history.js
-function generateOrderRow(order) {
+function canCancelOrder(order) {
+    if (order.status !== 'confirmed') return false;
+    const now = typeof getSimulatedDate === 'function' ? getSimulatedDate() : new Date();
+
+    const [y, m, d] = order.booking_date.split('-').map(Number);
+    const mealStart = new Date(y, m - 1, d, 23, 59, 59);
+
+    if (order.meal_type === 'breakfast') {
+        mealStart.setHours(7, 0, 0, 0);
+    } else if (order.meal_type === 'lunch') {
+        mealStart.setHours(11, 0, 0, 0);
+    }
+
+    return now < mealStart;
+}
+
+function generateOrderRow(order, includeAction = false) {
     const foodItems = order.items.map(i => i.food_item.name).join(", ");
     const bookingDate = new Date(order.booking_date).toLocaleDateString();
     let orderDate = order.created_at ? new Date(order.created_at).toLocaleString() : '-';
     const seatNumbers = (order.booked_seats && order.booked_seats.length > 0) 
         ? order.booked_seats.map(s => `T${s.seat.table_number}-S${s.seat.seat_number}`).join(", ")
         : `Parcel${order.drop_point ? ` (${order.drop_point.toUpperCase()})` : ''}`;
-    const deliveryInfo = order.delivery_window ? `<div style="font-size:0.8rem; color:#2ecc71;">Delivery: ${order.delivery_window}</div>` : '';
     
-    // Show cancel button only for 'confirmed' orders. The backend will validate the time.
-    const actionButton = order.status === 'confirmed'
+    const actionButton = canCancelOrder(order)
         ? `<button class="btn-danger" onclick="cancelOrder(${order.id})">Cancel</button>`
         : `<span class="text-disabled">Cannot Cancel</span>`;
-    
+
     return `
         <tr>
             <td>${bookingDate}</td>
             <td>${orderDate}</td>
             <td>${order.scheduled_slot}</td>
             <td>${foodItems}</td>
-            <td>${seatNumbers}${deliveryInfo}</td> 
+            <td>${seatNumbers}</td> 
             <td><span class="status-${order.status}">${order.status}</span></td>
-            <td>${actionButton}</td>
+            ${includeAction ? `<td>${actionButton}</td>` : ''}
         </tr>`;
 }
 
@@ -55,7 +69,17 @@ async function loadHistory() {
             <h2>Upcoming Pre-Booked Orders</h2>
             <p>These are your active bookings. You can cancel them before the cut-off time for a refund.</p>
             <table class="table">
-                ${originalTable.querySelector('thead').outerHTML}
+                <thead>
+                    <tr>
+                        <th>Booking Date</th>
+                        <th>Order Date</th>
+                        <th>Time Slot</th>
+                        <th>Food Items</th>
+                        <th>Seat ID</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
                 <tbody id="upcoming-orders-body"></tbody>
             </table>
         `;
@@ -68,7 +92,16 @@ async function loadHistory() {
             <h2>Order History</h2>
             <p>These are your past, collected, or cancelled orders.</p>
             <table class="table">
-                ${originalTable.querySelector('thead').outerHTML}
+                <thead>
+                    <tr>
+                        <th>Booking Date</th>
+                        <th>Order Date</th>
+                        <th>Time Slot</th>
+                        <th>Food Items</th>
+                        <th>Seat ID</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
                 <tbody id="past-orders-body"></tbody>
             </table>
         `;
@@ -78,16 +111,16 @@ async function loadHistory() {
     const upcomingTbody = document.getElementById('upcoming-orders-body');
     const pastTbody = document.getElementById('past-orders-body');
     upcomingTbody.innerHTML = '<tr><td colspan="7" class="text-center">Loading...</td></tr>';
-    pastTbody.innerHTML = '<tr><td colspan="7" class="text-center">Loading...</td></tr>';
+    pastTbody.innerHTML = '<tr><td colspan="6" class="text-center">Loading...</td></tr>';
 
     try {
-        const response = await fetch(`/order-history/${admissionNo}`);
+        const response = await fetch(`http://127.0.0.1:8000/order-history/${admissionNo}`);
 
         if (!response.ok) {
             const text = await response.text();
             console.error("Server error:", text);
             upcomingTbody.innerHTML = `<tr><td colspan="7" class="text-center" style="color: red;">Server error: ${text}</td></tr>`;
-            pastTbody.innerHTML = `<tr><td colspan="7" class="text-center" style="color: red;">Server error: ${text}</td></tr>`;
+            pastTbody.innerHTML = `<tr><td colspan="6" class="text-center" style="color: red;">Server error: ${text}</td></tr>`;
             return;
         }
 
@@ -114,24 +147,24 @@ async function loadHistory() {
             upcomingTbody.innerHTML = '<tr><td colspan="7" class="text-center">No upcoming pre-booked orders found.</td></tr>';
         } else {
             upcomingOrders.forEach(order => {
-                upcomingTbody.innerHTML += generateOrderRow(order);
+                upcomingTbody.innerHTML += generateOrderRow(order, true);
             });
         }
 
         // Render past orders
         pastTbody.innerHTML = "";
         if (pastOrders.length === 0) {
-            pastTbody.innerHTML = '<tr><td colspan="7" class="text-center">No past orders found.</td></tr>';
+            pastTbody.innerHTML = '<tr><td colspan="6" class="text-center">No past orders found.</td></tr>';
         } else {
             pastOrders.forEach(order => {
-                pastTbody.innerHTML += generateOrderRow(order);
+                pastTbody.innerHTML += generateOrderRow(order, false);
             });
         }
 
     } catch (err) {
         console.error("History failed to load:", err);
         upcomingTbody.innerHTML = '<tr><td colspan="7" class="text-center" style="color: red;">Error loading upcoming orders.</td></tr>';
-        pastTbody.innerHTML = '<tr><td colspan="7" class="text-center" style="color: red;">Error loading order history.</td></tr>';
+        pastTbody.innerHTML = '<tr><td colspan="6" class="text-center" style="color: red;">Error loading order history.</td></tr>';
     }
 }
 
@@ -141,7 +174,7 @@ async function cancelOrder(orderId) {
     }
     
     try {
-        const response = await fetch(`/bookings/${orderId}/cancel`, {
+        const response = await fetch(`http://127.0.0.1:8000/bookings/${orderId}/cancel`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
